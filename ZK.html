@@ -4591,10 +4591,39 @@ function guardarDatosEnCache() {
     }
 
     async function limpiarHojaConRetries(scope) {
-      if (!supaListo()) return false;
-      const r = await supaRpc('limpiar_historial', { p_token: state.sessionToken, p_scope: scope });
-      if (r && r.estado === 'superada') { mostrarSesionSuperadaModal(state.currentUser); return false; }
-      return !!(r && r.ok);
+      if (!supaListo()) return { ok: false, estado: '', error: 'Supabase no está configurado.' };
+      try {
+        const r = await supaRpc('limpiar_historial', { p_token: state.sessionToken, p_scope: scope });
+        if (!r || !r.ok) {
+          const st = (r && r.estado) || '';
+          if (st === 'superada' || st === 'invalida' || st === 'cerrada') mostrarSesionSuperadaModal(state.currentUser);
+          return { ok: false, estado: st, error: (r && r.error) || 'El servidor rechazó el borrado masivo.' };
+        }
+        return { ok: true };
+      } catch (err) {
+        console.error("Error limpiando historial:", err);
+        return { ok: false, estado: '', error: 'No se pudo contactar con Supabase: ' + ((err && err.message) || '') };
+      }
+    }
+
+    // Si el borrado masivo (limpiar_historial) es rechazado por el servidor,
+    // limpia registro por registro con las funciones individuales (que sí funcionan).
+    async function limpiarUnaPorUna(scope) {
+      if (scope === 'compras') {
+        const ids = (state.purchases || []).map(p => p.id);
+        const res = await Promise.allSettled(ids.map(id => eliminarCompraEnNube(id)));
+        return res.every(x => x.status === 'fulfilled' && x.value === true);
+      }
+      if (scope === 'clientes') {
+        const ceds = (state.clients || [])
+          .map(c => (c && c.cedula) || String((c && c.id) || '').replace(/^cli_/, ''))
+          .filter(Boolean);
+        const res = await Promise.allSettled(ceds.map(ced => supaRpc('eliminar_cliente', { p_token: state.sessionToken, p_cedula: ced })));
+        return res.every(x => x.status === 'fulfilled' && x.value && x.value.ok === true);
+      }
+      const ids = (state.sales || []).map(s => s.id);
+      const res = await Promise.allSettled(ids.map(id => eliminarVentaEnNube(id)));
+      return res.every(x => x.status === 'fulfilled' && x.value === true);
     }
 
     function abrirConfirmarLimpieza(modo) {
@@ -4624,11 +4653,16 @@ function guardarDatosEnCache() {
 
     async function ejecutarLimpiezaHistorial() {
       const scope = limpiezaModo;
-      const ok = await limpiarHojaConRetries(scope);
+      const res = await limpiarHojaConRetries(scope);
       cerrarConfirmarLimpieza();
-      if (!ok) {
-        if (supaListo()) showToast("No se pudo limpiar el historial en la nube. Verifica tu conexión e inténtalo de nuevo.", "error");
-        return;
+      if (!res.ok) {
+        if (res.estado) return;
+        const okUno = await limpiarUnaPorUna(scope);
+        if (!okUno) {
+          showToast("No se pudo limpiar el historial en la nube: " + (res.error || 'Error de conexión.') + " Inténtalo de nuevo.", "error");
+          return;
+        }
+        console.warn("limpiar_historial rechazado; se limpió registro por registro. Error original:", res.error);
       }
       marcarLimpieza(scope);
       if (scope === 'clientes') {
