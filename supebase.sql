@@ -150,15 +150,15 @@ returns table (ok boolean, username text, estado text, last_ts timestamptz)
 language plpgsql security definer
 set search_path = public
 as $$
+declare
+  v_row public.sesiones%rowtype;
 begin
-  return query
-    select (s.estado = 'activa') as ok,
-           coalesce(s.username, ''),
-           coalesce(s.estado, 'invalida'),
-           s.ultimo_latido
-      from public.sesiones s
-     where s.token = p_token
-     limit 1;
+  select * into v_row from public.sesiones where token = p_token limit 1;
+  if not found then
+    return query select false, ''::text, 'invalida'::text, null::timestamptz;
+  else
+    return query select (v_row.estado = 'activa'), v_row.username, v_row.estado, v_row.ultimo_latido;
+  end if;
 end;
 $$;
 
