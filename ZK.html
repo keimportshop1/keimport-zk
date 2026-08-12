@@ -574,10 +574,17 @@
                 <h2 class="text-2xl font-extrabold text-slate-900 dark:text-white tracking-tight">Panel Principal</h2>
                 <p class="text-sm text-slate-500 dark:text-slate-400 mt-0.5">Analíticas de ventas y saldos en tiempo real por plataforma.</p>
               </div>
-              <button onclick="switchView('compra')" class="px-4 py-2.5 bg-amber-500 text-slate-900 font-bold rounded-xl text-sm shadow-md hover:bg-amber-600 flex items-center space-x-2">
-                <i class="fa-solid fa-cart-arrow-down"></i>
-                <span>Registrar Compra</span>
-              </button>
+              <div class="flex items-center gap-2">
+                <button id="btn-ojos-panel" onclick="toggleMontosGlobal()" title="Mostrar todos los montos"
+                  class="px-4 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-amber-500/25 text-slate-700 dark:text-slate-200 font-bold rounded-xl text-sm shadow-md hover:bg-slate-50 dark:hover:bg-amber-500/10 flex items-center space-x-2">
+                  <i class="fa-solid fa-eye"></i>
+                  <span id="texto-btn-ojos-panel">Mostrar Montos</span>
+                </button>
+                <button onclick="switchView('compra')" class="px-4 py-2.5 bg-amber-500 text-slate-900 font-bold rounded-xl text-sm shadow-md hover:bg-amber-600 flex items-center space-x-2">
+                  <i class="fa-solid fa-cart-arrow-down"></i>
+                  <span>Registrar Compra</span>
+                </button>
+              </div>
             </div>
 
             <!-- Saldos en tiempo real por plataforma -->
@@ -3475,11 +3482,60 @@ function guardarDatosEnCache() {
       };
     }
 
+    // ==========================================
+    // MÁSCARA DE MONTOS (Panel Principal)
+    // ==========================================
+    let montosVisiblesGlobal = false;
+
+    function montosEfectivosDe(cardEl) {
+      const individual = cardEl.dataset.montosRevelado;
+      return individual !== undefined ? individual === '1' : montosVisiblesGlobal;
+    }
+
+    function aplicarMascaraTarjeta(cardEl) {
+      const visible = montosEfectivosDe(cardEl);
+      cardEl.querySelectorAll('.monto-ocultable').forEach(el => {
+        el.textContent = visible ? el.dataset.montoReal : '******';
+      });
+      const btn = cardEl.querySelector('.ojo-tarjeta');
+      if (btn) {
+        const icon = btn.querySelector('i');
+        if (icon) icon.className = 'fa-solid ' + (visible ? 'fa-eye-slash' : 'fa-eye');
+        btn.title = visible ? 'Ocultar montos' : 'Mostrar montos';
+      }
+    }
+
+    function aplicarMascaraMontos() {
+      document.querySelectorAll('.tarjeta-montos').forEach(aplicarMascaraTarjeta);
+      const btnGlobal = document.getElementById('btn-ojos-panel');
+      if (btnGlobal) {
+        const icon = btnGlobal.querySelector('i');
+        if (icon) icon.className = 'fa-solid ' + (montosVisiblesGlobal ? 'fa-eye-slash' : 'fa-eye');
+        btnGlobal.title = montosVisiblesGlobal ? 'Ocultar todos los montos' : 'Mostrar todos los montos';
+        const txt = document.getElementById('texto-btn-ojos-panel');
+        if (txt) txt.textContent = montosVisiblesGlobal ? 'Ocultar Montos' : 'Mostrar Montos';
+      }
+    }
+
+    function toggleMontosGlobal() {
+      montosVisiblesGlobal = !montosVisiblesGlobal;
+      document.querySelectorAll('.tarjeta-montos').forEach(card => {
+        delete card.dataset.montosRevelado;
+      });
+      aplicarMascaraMontos();
+    }
+
+    function toggleMontosTarjeta(cardEl) {
+      cardEl.dataset.montosRevelado = montosEfectivosDe(cardEl) ? '0' : '1';
+      aplicarMascaraTarjeta(cardEl);
+    }
+
     function renderPanel() {
       if (!document.getElementById('view-panel')) return;
       const saldos = calcularSaldos();
       const hoy = fechaHoyLocal();
       const cols = coloresPanel();
+      const spanMonto = (txt) => `<span class="monto-ocultable" data-monto-real="${txt.replace(/"/g, '&quot;')}">${esc(txt)}</span>`;
 
       // ---- Tarjetas de saldo ----
       const saldosEl = document.getElementById('panel-saldos');
@@ -3510,18 +3566,23 @@ function guardarDatosEnCache() {
           ? (v >= 0 ? '+' : '-') + '$' + Math.abs(v).toLocaleString('en-US', {minimumFractionDigits: 2})
           : (v >= 0 ? '+' : '-') + Math.abs(v).toLocaleString('es-VE', {minimumFractionDigits: 2}) + ' Bs';
         const lineas = [];
-        if (ventasEntra) lineas.push(`<p class="text-2xs font-semibold tnum text-emerald-600 dark:text-emerald-400 mt-1">Venta: ${fmtHoy(ventasEntra)}</p>`);
-        if (ventasSale) lineas.push(`<p class="text-2xs font-semibold tnum text-red-600 dark:text-red-400">Venta: ${fmtHoy(ventasSale)}</p>`);
-        if (comprasEntra) lineas.push(`<p class="text-2xs font-semibold tnum text-emerald-600 dark:text-emerald-400">Compra: ${fmtHoy(comprasEntra)}</p>`);
-        if (comprasSale) lineas.push(`<p class="text-2xs font-semibold tnum text-red-600 dark:text-red-400">${esUSD ? 'Venta' : 'Compra'}: ${fmtHoy(comprasSale)}</p>`);
+        if (ventasEntra) lineas.push(`<p class="text-2xs font-semibold tnum text-emerald-600 dark:text-emerald-400 mt-1">Venta: ${spanMonto(fmtHoy(ventasEntra))}</p>`);
+        if (ventasSale) lineas.push(`<p class="text-2xs font-semibold tnum text-red-600 dark:text-red-400">Venta: ${spanMonto(fmtHoy(ventasSale))}</p>`);
+        if (comprasEntra) lineas.push(`<p class="text-2xs font-semibold tnum text-emerald-600 dark:text-emerald-400">Compra: ${spanMonto(fmtHoy(comprasEntra))}</p>`);
+        if (comprasSale) lineas.push(`<p class="text-2xs font-semibold tnum text-red-600 dark:text-red-400">${esUSD ? 'Venta' : 'Compra'}: ${spanMonto(fmtHoy(comprasSale))}</p>`);
         const div = document.createElement('div');
-        div.className = "bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-amber-500/20 shadow-premium p-5";
+        div.className = "tarjeta-montos bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-amber-500/20 shadow-premium p-5";
         div.innerHTML = `
           <div class="flex items-center justify-between mb-3">
             <span class="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">${esc(p.name)}</span>
-            <i class="fa-solid ${esUSD ? 'fa-dollar-sign' : 'fa-coins'} text-amber-600 dark:text-amber-400"></i>
+            <div class="flex items-center space-x-1.5">
+              <button onclick="toggleMontosTarjeta(this.closest('.tarjeta-montos'))" class="ojo-tarjeta p-1.5 rounded-lg text-slate-400 dark:text-slate-500 hover:text-amber-600 dark:hover:text-amber-400 transition-all" title="Mostrar montos">
+                <i class="fa-solid fa-eye text-xs"></i>
+              </button>
+              <i class="fa-solid ${esUSD ? 'fa-dollar-sign' : 'fa-coins'} text-amber-600 dark:text-amber-400"></i>
+            </div>
           </div>
-          <p class="text-2xl font-black tnum truncate ${negativo ? 'text-red-600 dark:text-red-400' : 'text-slate-900 dark:text-white'}">${monto}</p>
+          <p class="text-2xl font-black tnum truncate ${negativo ? 'text-red-600 dark:text-red-400' : 'text-slate-900 dark:text-white'}">${spanMonto(monto)}</p>
           ${lineas.join('\n')}
         `;
         saldosEl.appendChild(div);
@@ -3538,20 +3599,25 @@ function guardarDatosEnCache() {
       const comprasHoyUsd = comprasHoy.reduce((a, c) => a + (c.usd || 0), 0);
 
       const kpis = [
-        { icon: 'fa-chart-line', label: 'Ventas de Hoy', valor: `${ventasHoy.length} operaciones`, sub: `$${ventasHoyUsd.toLocaleString('en-US', {minimumFractionDigits: 2})} · ${ventasHoyVes.toLocaleString('es-VE', {minimumFractionDigits: 2})} Bs` },
-        { icon: 'fa-coins', label: 'Comisiones Ganadas', valor: `$${comisiones.toLocaleString('en-US', {minimumFractionDigits: 2})}`, sub: 'Total histórico' },
-        { icon: 'fa-basket-shopping', label: 'Compras de Hoy', valor: `${comprasHoy.length} operaciones`, sub: `$${comprasHoyUsd.toLocaleString('en-US', {minimumFractionDigits: 2})} recibido` }
+        { icon: 'fa-chart-line', label: 'Ventas de Hoy', valorMonto: false, subMonto: true, valor: `${ventasHoy.length} operaciones`, sub: `$${ventasHoyUsd.toLocaleString('en-US', {minimumFractionDigits: 2})} · ${ventasHoyVes.toLocaleString('es-VE', {minimumFractionDigits: 2})} Bs` },
+        { icon: 'fa-coins', label: 'Comisiones Ganadas', valorMonto: true, subMonto: false, valor: `$${comisiones.toLocaleString('en-US', {minimumFractionDigits: 2})}`, sub: 'Total histórico' },
+        { icon: 'fa-basket-shopping', label: 'Compras de Hoy', valorMonto: false, subMonto: true, valor: `${comprasHoy.length} operaciones`, sub: `$${comprasHoyUsd.toLocaleString('en-US', {minimumFractionDigits: 2})} recibido` }
       ];
       kpis.forEach(k => {
         const div = document.createElement('div');
-        div.className = "bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-amber-500/20 shadow-premium p-6";
+        div.className = "tarjeta-montos bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-amber-500/20 shadow-premium p-6";
         div.innerHTML = `
           <div class="flex items-center justify-between">
             <span class="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">${k.label}</span>
-            <i class="fa-solid ${k.icon} text-amber-600 dark:text-amber-400"></i>
+            <div class="flex items-center space-x-1.5">
+              <button onclick="toggleMontosTarjeta(this.closest('.tarjeta-montos'))" class="ojo-tarjeta p-1.5 rounded-lg text-slate-400 dark:text-slate-500 hover:text-amber-600 dark:hover:text-amber-400 transition-all" title="Mostrar montos">
+                <i class="fa-solid fa-eye text-xs"></i>
+              </button>
+              <i class="fa-solid ${k.icon} text-amber-600 dark:text-amber-400"></i>
+            </div>
           </div>
-          <p class="text-2xl font-black tnum text-slate-900 dark:text-white mt-3">${k.valor}</p>
-          <p class="text-xs font-semibold text-slate-500 dark:text-slate-400 mt-1 tnum">${k.sub}</p>
+          <p class="text-2xl font-black tnum text-slate-900 dark:text-white mt-3">${k.valorMonto ? spanMonto(k.valor) : k.valor}</p>
+          <p class="text-xs font-semibold text-slate-500 dark:text-slate-400 mt-1 tnum">${k.subMonto ? spanMonto(k.sub) : k.sub}</p>
         `;
         kpisEl.appendChild(div);
       });
@@ -3682,6 +3748,7 @@ function guardarDatosEnCache() {
         }
       });
       }
+      aplicarMascaraMontos();
     }
 
     // ==========================================
