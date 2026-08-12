@@ -2505,6 +2505,17 @@ function doPost(e) {
       if (!d) return false;
       let cambio = false;
 
+      const cfg = d.config;
+      if (cfg) {
+        if (cfg.exchange_rate !== undefined) state.exchangeRate = parseFloat(cfg.exchange_rate) || state.exchangeRate;
+        if (cfg.ranges !== undefined && Array.isArray(cfg.ranges) && !aplicandoEnTablaRangos()) state.ranges = cfg.ranges;
+        if (cfg.method_map !== undefined && typeof cfg.method_map === 'object') state.methodPlatformMap = cfg.method_map;
+        if (cfg.movimientos !== undefined) state.movements = cfg.movimientos;
+        if (cfg.clear_marker !== undefined && typeof cfg.clear_marker === 'object') state.clearMarker = cfg.clear_marker;
+        state.cloudReady = true;
+        state.configSincronizada = true;
+      }
+
       if (Array.isArray(d.ventas)) {
         const norm = d.ventas.map(s => {
           s.date = s.fecha;
@@ -2514,7 +2525,7 @@ function doPost(e) {
           if (!Array.isArray(s.movements)) s.movements = [];
           s.clientData = s.cedula ? { cedula: s.cedula, name: s.client, contact: s.contacto, bank: s.banco, last4: s.last4, last4Alt: s.last4Alt } : undefined;
           return s;
-        });
+        }).filter(s => !filaViejaParaLimpieza('ventas', s.createdAt));
         if (JSON.stringify(norm) !== JSON.stringify(state.sales)) { state.sales = ordenarPorFecha(norm); cambio = true; }
       }
       if (Array.isArray(d.compras)) {
@@ -2526,7 +2537,7 @@ function doPost(e) {
           if (typeof p.movements === 'string') { try { p.movements = JSON.parse(p.movements); } catch(e) { p.movements = []; } }
           if (!Array.isArray(p.movements)) p.movements = [];
           return p;
-        });
+        }).filter(p => !filaViejaParaLimpieza('compras', p.createdAt));
         if (JSON.stringify(norm) !== JSON.stringify(state.purchases)) { state.purchases = ordenarPorFecha(norm); cambio = true; }
       }
       if (Array.isArray(d.clientes)) {
@@ -2543,16 +2554,6 @@ function doPost(e) {
           const despues = JSON.stringify(state.platforms.map(clave));
           if (antes !== despues) cambio = true;
         }
-      }
-      const cfg = d.config;
-      if (cfg) {
-        if (cfg.exchange_rate !== undefined) state.exchangeRate = parseFloat(cfg.exchange_rate) || state.exchangeRate;
-        if (cfg.ranges !== undefined && Array.isArray(cfg.ranges) && !aplicandoEnTablaRangos()) state.ranges = cfg.ranges;
-        if (cfg.method_map !== undefined && typeof cfg.method_map === 'object') state.methodPlatformMap = cfg.method_map;
-        if (cfg.movimientos !== undefined) state.movements = cfg.movimientos;
-        if (cfg.clear_marker !== undefined && typeof cfg.clear_marker === 'object') state.clearMarker = cfg.clear_marker;
-        state.cloudReady = true;
-        state.configSincronizada = true;
       }
       if (d.resumen) {
         state._resumen = d.resumen;
@@ -3891,10 +3892,14 @@ function guardarDatosEnCache() {
       if (elN) elN.textContent = state.purchases.length;
     }
 
-    function eliminarFilaCompra(id) {
+    async function eliminarFilaCompra(id) {
+      const ok = await eliminarCompraEnNube(id);
+      if (!ok) {
+        if (supaListo()) showToast("No se pudo eliminar el registro en la nube. Verifica tu conexión e inténtalo de nuevo.", "error");
+        return;
+      }
       state.purchases = state.purchases.filter(c => c.id !== id);
       guardarDatosEnCache();
-      eliminarCompraEnNube(id);
       renderHistorialCompras();
       renderKPIsCompras();
       renderPanel();
@@ -4481,10 +4486,14 @@ function guardarDatosEnCache() {
       renderHistorial();
     }
 
-    function eliminarFilaVenta(id) {
+    async function eliminarFilaVenta(id) {
+      const ok = await eliminarVentaEnNube(id);
+      if (!ok) {
+        if (supaListo()) showToast("No se pudo eliminar el registro en la nube. Verifica tu conexión e inténtalo de nuevo.", "error");
+        return;
+      }
       state.sales = state.sales.filter(s => s.id !== id);
       guardarDatosEnCache();
-      eliminarVentaEnNube(id);
       renderHistorial();
       renderKPIs();
       renderPanel();
@@ -4573,11 +4582,12 @@ function guardarDatosEnCache() {
       return m ? parseInt(m[1], 10) : 0;
     }
 
-    function filaViejaParaLimpieza(scope, id) {
+    function filaViejaParaLimpieza(scope, fechaIso) {
       const ts = tsGuardLimpieza(scope);
       if (!ts) return false;
-      const idTs = parseIdTs(id);
-      return idTs > 0 && idTs < ts;
+      if (!fechaIso) return false;
+      const t = new Date(fechaIso).getTime();
+      return !isNaN(t) && t < ts;
     }
 
     async function limpiarHojaConRetries(scope) {
@@ -4613,35 +4623,33 @@ function guardarDatosEnCache() {
     }
 
     async function ejecutarLimpiezaHistorial() {
-      if (limpiezaModo === 'clientes') {
-        marcarLimpieza('clientes');
+      const scope = limpiezaModo;
+      const ok = await limpiarHojaConRetries(scope);
+      cerrarConfirmarLimpieza();
+      if (!ok) {
+        if (supaListo()) showToast("No se pudo limpiar el historial en la nube. Verifica tu conexión e inténtalo de nuevo.", "error");
+        return;
+      }
+      marcarLimpieza(scope);
+      if (scope === 'clientes') {
         state.clients = [];
         guardarDatosEnCache();
-        limpiarHojaConRetries('clientes');
-        cerrarConfirmarLimpieza();
         renderClientes();
         renderPanel();
         showToast("Clientes vaciados por completo.", "success");
         return;
       }
-      if (limpiezaModo === 'compras') {
-        marcarLimpieza('compras');
+      if (scope === 'compras') {
         state.purchases = [];
         guardarDatosEnCache();
-        limpiarHojaConRetries('compras');
-        cerrarConfirmarLimpieza();
         renderHistorialCompras();
         renderKPIsCompras();
         renderPanel();
         showToast("Compras limpiadas por completo.", "success");
         return;
       }
-
-      marcarLimpieza('ventas');
       state.sales = [];
       guardarDatosEnCache();
-      limpiarHojaConRetries('ventas');
-      cerrarConfirmarLimpieza();
       renderHistorial();
       renderKPIs();
       renderPanel();
