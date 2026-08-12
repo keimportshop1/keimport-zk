@@ -1112,12 +1112,21 @@
                   <h3 class="font-bold text-slate-900 dark:text-white flex items-center gap-2">
                     <i class="fa-solid fa-sack-dollar text-amber-600 dark:text-amber-400"></i> Cotización Activa (USD/VES)
                   </h3>
-                  <div class="space-y-2">
+                  <div class="space-y-3">
+                    <div class="flex items-center justify-between rounded-xl bg-amber-50 dark:bg-amber-500/15 border border-amber-100 dark:border-amber-500/20 px-4 py-3">
+                      <p class="text-2xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Tasa Activa</p>
+                      <p id="tasa-activa-label" class="font-black text-2xl text-amber-600 dark:text-amber-400">0.00 Bs/$</p>
+                    </div>
                     <div class="relative">
-                      <input type="number" id="input-tasa-cambio" step="any" min="0" oninput="cambiarTasaAlVuelo(this.value)"
+                      <input type="number" id="input-tasa-cambio" step="any" min="0" oninput="vistaPreviaTasa(this.value)"
                         class="w-full px-4 py-3.5 rounded-xl border border-slate-200 dark:border-amber-500/25 font-black text-3xl text-amber-600 dark:text-amber-400 bg-white dark:bg-slate-800">
                       <span class="absolute right-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-slate-800 py-1.5 px-3 rounded-lg border">Bs/$</span>
                     </div>
+                    <p id="tasa-preview-label" class="hidden text-xs font-semibold text-amber-600 dark:text-amber-400">Nueva tasa: 0.00 Bs/$ — pulsa Actualizar para aplicarla</p>
+                    <button onclick="aplicarTasa()" class="w-full py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-900 text-sm font-bold rounded-xl flex items-center justify-center space-x-2 shadow-md">
+                      <i class="fa-solid fa-rotate"></i>
+                      <span>Actualizar Tasa</span>
+                    </button>
                   </div>
                 </div>
                 <div class="bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-amber-500/20 shadow-premium p-6 space-y-4">
@@ -2542,6 +2551,7 @@ function guardarDatosEnCache() {
         renderPlataformasAjustes();
         renderMapaMetodosAjustes();
         document.getElementById('input-tasa-cambio').value = state.exchangeRate;
+        refrescarIndicadorTasaActiva();
         document.getElementById('cloud-enabled').checked = state.cloudConfig.enabled;
         document.getElementById('cloud-firebase-project').value = state.cloudConfig.firebaseProject;
         document.getElementById('cloud-supabase-url').value = state.cloudConfig.supabaseUrl;
@@ -2910,31 +2920,54 @@ function guardarDatosEnCache() {
       });
     }
 
-    let tasaSavedAt = 0;
-    let tasaDebounceTimer = null;
-    function cambiarTasaAlVuelo(valor) {
+    function vistaPreviaTasa(valor) {
       const tasa = parseFloat(valor);
-      if (!isNaN(tasa) && tasa > 0) {
-        state.exchangeRate = tasa;
-        tasaSavedAt = Date.now();
-        const flotante = document.getElementById('tasa-flotante-label');
-        if (flotante) flotante.textContent = `${state.exchangeRate.toFixed(2)} Bs/$`;
-        
-        const inputUsdNeto = document.getElementById("input-usd-neto");
-        if (inputUsdNeto) {
-          const netUsd = parseFloat(inputUsdNeto.value);
-          if (!isNaN(netUsd) && netUsd > 0) {
-            calcularDesdeNetUsd(netUsd);
-          }
+      const preview = document.getElementById('tasa-preview-label');
+      const flotante = document.getElementById('tasa-flotante-label');
+      const flotanteCompra = document.getElementById('tasa-compra-flotante');
+      const nueva = !isNaN(tasa) && tasa > 0 ? tasa : null;
+      if (preview) {
+        if (nueva !== null && Math.abs(nueva - state.exchangeRate) >= 0.0001) {
+          preview.textContent = `Nueva tasa: ${nueva.toFixed(2)} Bs/$ — pulsa Actualizar para aplicarla`;
+          preview.classList.remove('hidden');
+        } else {
+          preview.classList.add('hidden');
         }
-        guardarDatosEnCache();
-        clearTimeout(tasaDebounceTimer);
-        tasaDebounceTimer = setTimeout(() => {
-          if (supaListo()) {
-            guardarConfigEnNube();
-          }
-        }, 700);
       }
+      if (flotante && nueva !== null) flotante.textContent = `${nueva.toFixed(2)} Bs/$ (sin guardar)`;
+      if (flotanteCompra && nueva !== null) flotanteCompra.textContent = `${nueva.toFixed(2)} Bs/$ (sin guardar)`;
+    }
+
+    function refrescarIndicadorTasaActiva() {
+      const label = document.getElementById('tasa-activa-label');
+      if (label) label.textContent = `${state.exchangeRate.toFixed(2)} Bs/$`;
+      const preview = document.getElementById('tasa-preview-label');
+      if (preview) preview.classList.add('hidden');
+      const flotante = document.getElementById('tasa-flotante-label');
+      if (flotante) flotante.textContent = `${state.exchangeRate.toFixed(2)} Bs/$`;
+      const flotanteCompra = document.getElementById('tasa-compra-flotante');
+      if (flotanteCompra) flotanteCompra.textContent = `${state.exchangeRate.toFixed(2)} Bs/$`;
+    }
+
+    function aplicarTasa() {
+      const tasa = parseFloat(document.getElementById('input-tasa-cambio').value);
+      if (isNaN(tasa) || tasa <= 0) {
+        showToast("Tasa inválida.", "error");
+        return;
+      }
+      state.exchangeRate = tasa;
+      guardarDatosEnCache();
+      renderAllViews();
+      refrescarIndicadorTasaActiva();
+      const inputUsdNeto = document.getElementById("input-usd-neto");
+      if (inputUsdNeto) {
+        const netUsd = parseFloat(inputUsdNeto.value);
+        if (!isNaN(netUsd) && netUsd > 0) {
+          calcularDesdeNetUsd(netUsd);
+        }
+      }
+      guardarConfigEnNube();
+      showToast("Tasa actualizada: " + state.exchangeRate.toFixed(2) + " Bs/$", "success");
     }
 
     // ==========================================
@@ -4103,6 +4136,7 @@ function guardarDatosEnCache() {
         return;
       }
       state.exchangeRate = tasaInput;
+      refrescarIndicadorTasaActiva();
 
       const cloudActivada = !state.cloudConfig.enabled && document.getElementById('cloud-enabled').checked;
       state.cloudConfig.enabled = document.getElementById('cloud-enabled').checked;
@@ -4648,7 +4682,8 @@ function guardarDatosEnCache() {
         if (!ok) return;
         if (state.exchangeRate !== oldRate) {
           const tasaInput = document.getElementById('input-tasa-cambio');
-          if (tasaInput) tasaInput.value = state.exchangeRate;
+          if (tasaInput && document.activeElement !== tasaInput) tasaInput.value = state.exchangeRate;
+          refrescarIndicadorTasaActiva();
           const inputUsdNeto = document.getElementById('input-usd-neto');
           if (inputUsdNeto) {
             const val = parseFloat(inputUsdNeto.value);
