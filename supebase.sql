@@ -250,6 +250,24 @@ begin
 end;
 $$;
 
+-- Elimina un usuario (no permite eliminar la propia cuenta activa)
+create or replace function public.eliminar_usuario(p_token text, p_username text)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare v_ses record;
+begin
+  select * into v_ses from public._sesion_valida(p_token);
+  if not v_ses.ok then return jsonb_build_object('ok', false, 'estado', v_ses.estado); end if;
+  if v_ses.username = lower(btrim(p_username)) then
+    return jsonb_build_object('ok', false, 'msg', 'No puedes eliminar tu propia cuenta mientras estás conectado.');
+  end if;
+  delete from public.usuarios where username = lower(btrim(p_username));
+  return jsonb_build_object('ok', true);
+end;
+$$;
+
 -- ------------------------------------------------------------
 -- LECTURAS (siempre despuÃ©s de validar sesiÃ³n)
 -- ------------------------------------------------------------
@@ -706,6 +724,7 @@ grant execute on function public.login(text, text, text) to anon;
 grant execute on function public.registrar_usuario(text, text, text) to anon;
 grant execute on function public.cambiar_contrasena(text, text, text) to anon;
 grant execute on function public.cerrar_sesion(text) to anon;
+grant execute on function public.eliminar_usuario(text, text) to anon;
 grant execute on function public._sesion_valida(text) to anon;
 grant execute on function public.get_estado(text) to anon;
 grant execute on function public.get_resumen(text) to anon;
