@@ -2381,6 +2381,72 @@ function doPost(e) {
     }
 
     // ==========================================
+    // VALIDACIÓN DE FONDOS (venta / compra)
+    // ==========================================
+    let pendingForzarFondos = null;
+
+    function formatearMonto(n, moneda) {
+      const s = n.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      return moneda === 'USD' ? '$' + s : moneda === 'VES' ? 'Bs ' + s : s + ' ' + (moneda || '');
+    }
+
+    function verificarFondos(movements) {
+      const problemas = [];
+      (movements || []).forEach(m => {
+        const delta = Number(m.delta) || 0;
+        if (delta >= 0) return;
+        const p = state.platforms.find(x => x.id === m.platform);
+        if (!p) return;
+        const saldo = Number(p.initialBalance) || 0;
+        const faltante = -saldo - delta;
+        if (faltante > 0.0001) {
+          problemas.push({ nombre: p.name, moneda: p.currency, saldo: saldo, faltante: faltante });
+        }
+      });
+      return problemas;
+    }
+
+    function mostrarModalFondos(problemas, onConfirm) {
+      pendingForzarFondos = onConfirm;
+      const overlay = document.createElement('div');
+      overlay.id = 'modal-fondos-insuficientes';
+      overlay.className = 'fixed inset-0 z-[998] flex items-center justify-center bg-black/60 p-4';
+      overlay.innerHTML = `
+        <div class="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-md border p-6 shadow-xl">
+          <div class="mx-auto w-12 h-12 rounded-full bg-amber-100 dark:bg-amber-500/20 flex items-center justify-center mb-4">
+            <i class="fa-solid fa-triangle-exclamation text-amber-600 dark:text-amber-400 text-xl"></i>
+          </div>
+          <h3 class="text-lg font-bold text-slate-900 dark:text-white text-center mb-1">Fondos insuficientes</h3>
+          <p class="text-xs text-slate-500 dark:text-slate-400 text-center mb-4">Estas plataformas no tienen saldo suficiente para la operación.</p>
+          <div class="space-y-2 mb-6">` + problemas.map(p => `
+            <div class="flex items-center justify-between rounded-xl bg-red-50 dark:bg-red-500/10 border border-red-100 dark:border-red-500/20 px-3 py-2.5">
+              <div>
+                <p class="font-bold text-xs text-slate-800 dark:text-slate-100">${esc(p.nombre)}</p>
+                <p class="text-2xs text-slate-500 dark:text-slate-400">Saldo: ${formatearMonto(p.saldo, p.moneda)}</p>
+              </div>
+              <p class="font-black text-xs text-red-600 dark:text-red-400 text-right">Faltan ${formatearMonto(p.faltante, p.moneda)}</p>
+            </div>`).join('') + `</div>
+          <div class="flex gap-3">
+            <button onclick="cerrarModalFondos()" class="flex-1 px-4 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold text-sm">Cancelar</button>
+            <button onclick="confirmarForzarFondos()" class="flex-1 px-4 py-2.5 rounded-xl bg-amber-600 text-white font-semibold text-sm">Forzar de todos modos</button>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+    }
+
+    function cerrarModalFondos() {
+      pendingForzarFondos = null;
+      const el = document.getElementById('modal-fondos-insuficientes');
+      if (el) el.remove();
+    }
+
+    function confirmarForzarFondos() {
+      const cb = pendingForzarFondos;
+      cerrarModalFondos();
+      if (cb) cb();
+    }
+
+    // ==========================================
     // PERSISTENCIA Y CARGA DE DATOS (SUPABASE)
     // ==========================================
     // Supabase es la base PRINCIPAL. Este método descarga el estado
@@ -3037,6 +3103,8 @@ function guardarDatosEnCache() {
         const hora = document.getElementById("input-hora").value || "00:00";
         const fechaFormateada = formatearFechaHora(fecha, hora);
 
+        const continuarVenta = async () => {
+        try {
         // Transacción atómica en Supabase: venta + movimientos + cliente + saldos
         const r = await supaRpc('registrar_venta', {
           p_token: state.sessionToken,
@@ -3116,6 +3184,22 @@ function guardarDatosEnCache() {
         } else {
           showToast(`Venta guardada para ${cliente}.`, "success");
         }
+        } finally {
+          guardandoVenta = false;
+          if (btn) setLoading('btn-guardar-venta', false);
+        }
+        };
+
+        const problemasFondos = verificarFondos(movements);
+        if (problemasFondos.length > 0) {
+          mostrarModalFondos(problemasFondos, () => {
+            guardandoVenta = true;
+            if (btn) setLoading('btn-guardar-venta', true);
+            continuarVenta();
+          });
+          return;
+        }
+        await continuarVenta();
       } finally {
         guardandoVenta = false;
         if (btn) setLoading('btn-guardar-venta', false);
@@ -3230,6 +3314,8 @@ function guardarDatosEnCache() {
         const hora = document.getElementById("input-compra-hora").value || "00:00";
         const dateDisplay = formatearFechaHora(fecha, hora);
 
+        const continuarCompra = async () => {
+        try {
         // Transacción atómica en Supabase: compra + movimientos + saldos
         const r = await supaRpc('registrar_compra', {
           p_token: state.sessionToken,
@@ -3291,6 +3377,22 @@ function guardarDatosEnCache() {
         renderPanel();
         rellenarSelectPlataformasUSD();
         showToast(`Compra guardada: ${vendedor} ($${usd.toFixed(2)}).`, "success");
+        } finally {
+          guardandoCompra = false;
+          if (btn) setLoading('btn-guardar-compra', false);
+        }
+        };
+
+        const problemasFondosCompra = verificarFondos(movements);
+        if (problemasFondosCompra.length > 0) {
+          mostrarModalFondos(problemasFondosCompra, () => {
+            guardandoCompra = true;
+            if (btn) setLoading('btn-guardar-compra', true);
+            continuarCompra();
+          });
+          return;
+        }
+        await continuarCompra();
       } finally {
         guardandoCompra = false;
         if (btn) setLoading('btn-guardar-compra', false);
