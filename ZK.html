@@ -2441,7 +2441,7 @@ function doPost(e) {
       const cfg = d.config;
       if (cfg) {
         if (cfg.exchange_rate !== undefined) state.exchangeRate = parseFloat(cfg.exchange_rate) || state.exchangeRate;
-        if (cfg.ranges !== undefined && Array.isArray(cfg.ranges)) state.ranges = cfg.ranges;
+        if (cfg.ranges !== undefined && Array.isArray(cfg.ranges) && !aplicandoEnTablaRangos()) state.ranges = cfg.ranges;
         if (cfg.method_map !== undefined && typeof cfg.method_map === 'object') state.methodPlatformMap = cfg.method_map;
         if (cfg.movimientos !== undefined) state.movements = cfg.movimientos;
         if (cfg.clear_marker !== undefined && typeof cfg.clear_marker === 'object') state.clearMarker = cfg.clear_marker;
@@ -4057,17 +4057,20 @@ function guardarDatosEnCache() {
           state.ranges[idx][campo] = valor;
         }
       }
+      guardarConfigEnNube();
     }
 
     function agregarFilaRango() {
       const maxId = state.ranges.reduce((max, r) => r.id > max ? r.id : max, 0);
       state.ranges.push({ id: maxId + 1, min: 0, max: null, type: 'fixed', value: 0 });
       renderTarifasAjustes();
+      guardarConfigEnNube();
     }
 
     function eliminarRango(id) {
       state.ranges = state.ranges.filter(r => r.id !== id);
       renderTarifasAjustes();
+      guardarConfigEnNube();
     }
 
     function restablecerTarifasFabrica() {
@@ -4493,6 +4496,14 @@ function guardarDatosEnCache() {
       if (!el) return false;
       if (el.tagName !== 'INPUT' && el.tagName !== 'SELECT') return false;
       const t = el.closest ? el.closest('#tabla-plataformas') : null;
+      return !!t;
+    }
+
+    function aplicandoEnTablaRangos() {
+      const el = document.activeElement;
+      if (!el) return false;
+      if (el.tagName !== 'INPUT' && el.tagName !== 'SELECT') return false;
+      const t = el.closest ? el.closest('#tabla-crud-tarifas') : null;
       return !!t;
     }
 
