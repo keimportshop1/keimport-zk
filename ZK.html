@@ -2433,9 +2433,15 @@ function doPost(e) {
         if (JSON.stringify(d.clientes) !== JSON.stringify(state.clients)) { state.clients = d.clientes; cambio = true; }
       }
       if (Array.isArray(d.plataformas)) {
-        if (!aplicandoEnTablaPlataformas() && JSON.stringify(d.plataformas) !== JSON.stringify(state.platforms)) {
-          state.platforms = d.plataformas;
-          cambio = true;
+        if (!aplicandoEnTablaPlataformas()) {
+          if (!Array.isArray(state.platforms) || state.platforms.length === 0) {
+            state.platforms = JSON.parse(JSON.stringify(DEFAULT_PLATFORMS));
+          }
+          const clave = (p) => [p.id, Number(p.initialBalance) || 0, p.name, p.currency];
+          const antes = JSON.stringify(state.platforms.map(clave));
+          aplicarPlataformasDesdeNube(d.plataformas);
+          const despues = JSON.stringify(state.platforms.map(clave));
+          if (antes !== despues) cambio = true;
         }
       }
       const cfg = d.config;
