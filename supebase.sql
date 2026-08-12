@@ -529,18 +529,27 @@ set search_path = public
 as $$
 declare
   v_ses record;
-  v_mov jsonb;
-  m jsonb;
+  v_compra record;
+  v_platout text;
 begin
   select * into v_ses from public._sesion_valida(p_token);
   if not v_ses.ok then return jsonb_build_object('ok', false, 'estado', v_ses.estado); end if;
-  select movimientos into v_mov from public.compras where id = p_id::uuid;
-  -- Revierte el efecto de la compra sobre los saldos antes de borrarla
-  for m in select * from jsonb_array_elements(coalesce(v_mov, '[]'::jsonb)) loop
+  select monto_usd, monto_ves, plataforma, metodo
+    into v_compra from public.compras where id = p_id::uuid;
+  if not found then
+    return jsonb_build_object('ok', false, 'msg', 'La compra no existe.');
+  end if;
+  -- Revierte la entrada de USD a la plataforma que la recibió
+  update public.plataformas
+     set saldo = saldo - v_compra.monto_usd, updated_at = now()
+   where id = v_compra.plataforma;
+  -- Revierte la salida del método de pago (plataforma según el mapa de métodos)
+  select method_map ->> v_compra.metodo into v_platout from public.config where uid = 1;
+  if v_platout is not null and v_platout <> '' then
     update public.plataformas
-       set saldo = saldo - (m->>'delta')::numeric, updated_at = now()
-     where id = (m->>'platform')::text;
-  end loop;
+       set saldo = saldo + v_compra.monto_ves, updated_at = now()
+     where id = v_platout;
+  end if;
   delete from public.compras where id = p_id::uuid;
   update public.config set last_purchase_at = now(), updated_at = now() where uid = 1;
   return jsonb_build_object('ok', true);
