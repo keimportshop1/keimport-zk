@@ -835,15 +835,15 @@
                 </div>
                 <div id="bloque-comision-compra" class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
                   <div class="space-y-2">
-                    <label for="input-compra-comision" class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Comisión / Diferencia (Bs)</label>
+                    <label for="input-compra-comision" id="label-compra-comision" class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Comisión / Diferencia (Bs)</label>
                     <div class="relative">
-                      <span class="absolute left-4 top-1/2 -translate-y-1/2 font-bold text-slate-400 dark:text-slate-500 text-sm">Bs</span>
+                      <span id="span-compra-comision-pref" class="absolute left-4 top-1/2 -translate-y-1/2 font-bold text-slate-400 dark:text-slate-500 text-sm">Bs</span>
                       <input type="number" id="input-compra-comision" placeholder="0,00 (opcional)" step="any" min="0" oninput="calcularCompra()"
                         class="w-full pl-10 pr-4 py-4 rounded-xl border border-slate-200 dark:border-amber-500/25 focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/15 text-xl font-bold transition-all text-slate-800 dark:text-slate-100 bg-slate-50/50 dark:bg-slate-800/50">
                     </div>
-                    <p class="text-2xs text-slate-400 dark:text-slate-500">Ej: si Binance cobra de más, escribe aquí la diferencia en Bs. Vacío = sin comisión.</p>
+                    <p id="help-compra-comision" class="text-2xs text-slate-400 dark:text-slate-500">Ej: si Binance cobra de más, escribe aquí la diferencia en Bs. Vacío = sin comisión.</p>
                   </div>
-                  <div class="space-y-2">
+                  <div id="bloque-tasa-efectiva-compra" class="space-y-2">
                     <label class="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Tasa Efectiva</label>
                     <div class="relative rounded-xl border border-slate-200 dark:border-amber-500/25 px-4 py-4 bg-slate-50/50 dark:bg-slate-800/50">
                       <p id="tasa-efectiva-compra" class="text-xl font-black text-slate-900 dark:text-white">—</p>
@@ -3260,8 +3260,16 @@ function guardarDatosEnCache() {
       if (labelRes) labelRes.textContent = esU2U ? "Total a Pagar en Dólares" : "Total a Pagar en Bolívares";
       const hint = document.getElementById("hint-compra-u2u");
       if (hint) hint.classList.toggle('hidden', !esU2U);
-      const bloqueComision = document.getElementById("bloque-comision-compra");
-      if (bloqueComision) bloqueComision.classList.toggle('hidden', esU2U);
+      const labelComision = document.getElementById("label-compra-comision");
+      if (labelComision) labelComision.textContent = esU2U ? "Comisión / Diferencia (USD)" : "Comisión / Diferencia (Bs)";
+      const prefComision = document.getElementById("span-compra-comision-pref");
+      if (prefComision) prefComision.textContent = esU2U ? "$" : "Bs";
+      const helpComision = document.getElementById("help-compra-comision");
+      if (helpComision) helpComision.textContent = esU2U
+        ? "Ej: si pagas de más por la plataforma, escribe la diferencia en USD. Vacío = sin comisión."
+        : "Ej: si Binance cobra de más, escribe aquí la diferencia en Bs. Vacío = sin comisión.";
+      const bloqueTasaEfectiva = document.getElementById("bloque-tasa-efectiva-compra");
+      if (bloqueTasaEfectiva) bloqueTasaEfectiva.classList.toggle('hidden', esU2U);
       calcularCompra();
     }
 
@@ -3270,15 +3278,21 @@ function guardarDatosEnCache() {
       const totalEl = document.getElementById("input-compra-total-ves");
       const resumenEl = document.getElementById("resumen-compra-total-ves");
       const tasaEfectivaEl = document.getElementById("tasa-efectiva-compra");
+      const comision = parseFloat(document.getElementById("input-compra-comision")?.value) || 0;
       if (esCompraUSDtoUSD()) {
-        const monto = (isNaN(usd) || usd <= 0) ? 0 : usd;
-        if (totalEl) totalEl.value = usd <= 0 ? "" : usd.toFixed(2);
-        if (resumenEl) resumenEl.textContent = `${monto.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} USD`;
+        if (isNaN(usd) || usd <= 0) {
+          if (totalEl) totalEl.value = "";
+          if (resumenEl) resumenEl.textContent = "0.00 USD";
+          if (tasaEfectivaEl) tasaEfectivaEl.textContent = "—";
+          return;
+        }
+        const total = usd + comision;
+        if (totalEl) totalEl.value = total.toFixed(2);
+        if (resumenEl) resumenEl.textContent = `${total.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} USD`;
         if (tasaEfectivaEl) tasaEfectivaEl.textContent = "—";
         return;
       }
       const tasa = parseFloat(document.getElementById("input-compra-tasa")?.value);
-      const comision = parseFloat(document.getElementById("input-compra-comision")?.value) || 0;
       if (isNaN(usd) || isNaN(tasa) || usd <= 0 || tasa <= 0) {
         if (totalEl) totalEl.value = "";
         if (resumenEl) resumenEl.textContent = "0,00 VES";
