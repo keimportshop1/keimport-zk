@@ -666,10 +666,15 @@
                       <div class="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center shrink-0">
                         <i class="fa-solid fa-coins text-amber-600 dark:text-amber-400"></i>
                       </div>
-                      <div>
+                      <div class="flex-1">
                         <p class="text-2xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Comisión Aplicada</p>
                         <p id="label-comision" class="font-extrabold text-xl text-amber-600 dark:text-amber-400">+$0.00 <span class="text-xs text-slate-400 dark:text-slate-500 font-normal">(Fijo)</span></p>
                       </div>
+                      <button id="btn-toggle-comision" type="button" onclick="alternarComisionVenta()" title="Activar o desactivar la comisión automática"
+                        class="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all select-none border bg-amber-500 text-slate-900 border-amber-500 hover:bg-amber-400">
+                        <span id="btn-toggle-comision-dot" class="w-2 h-2 rounded-full bg-slate-900"></span>
+                        <span id="btn-toggle-comision-txt">Comisión ON</span>
+                      </button>
                     </div>
                     <div class="h-px md:h-10 w-full md:w-px bg-slate-200 dark:bg-slate-700"></div>
                     <div class="flex items-center space-x-3">
@@ -2763,10 +2768,29 @@ function guardarDatosEnCache() {
         inputVesTotal.addEventListener("input", () => {
           const totalVes = parseFloat(inputVesTotal.value);
           if (isNaN(totalVes) || totalVes <= 0) {
-            limpiarVisualCalculadora(true);
+            if (comisionVentaActiva) {
+              limpiarVisualCalculadora(true);
+            } else {
+              const lc = document.getElementById("label-comision");
+              const lt = document.getElementById("label-total-usd");
+              if (lc) lc.innerHTML = `+$0.00 <span class="text-xs text-slate-400 dark:text-slate-500 font-normal">(Sin comisión)</span>`;
+              if (lt) lt.textContent = `$0.00`;
+              renderResumenVenta(0, 0);
+            }
             return;
           }
-          calcularDesdeTotalVes(totalVes);
+          if (comisionVentaActiva) {
+            calcularDesdeTotalVes(totalVes);
+          } else {
+            const esUsd = metodoVentaEsUSD();
+            const totalUsd = esUsd ? totalVes : totalVes / state.exchangeRate;
+            const totalVesFinal = esUsd ? totalVes * state.exchangeRate : totalVes;
+            const lc = document.getElementById("label-comision");
+            const lt = document.getElementById("label-total-usd");
+            if (lc) lc.innerHTML = `+$0.00 <span class="text-xs text-slate-400 dark:text-slate-500 font-normal">(Sin comisión)</span>`;
+            if (lt) lt.textContent = `$${totalUsd.toFixed(2)}`;
+            renderResumenVenta(totalUsd, totalVesFinal);
+          }
         });
       }
 
@@ -2781,54 +2805,68 @@ function guardarDatosEnCache() {
     let internetClock = null;
 
     async function sincronizarHoraInternet() {
-      const antes = Date.now();
+      // 1) timeapi.io: hora local de Caracas (JSON, CORS OK, estable)
       try {
-        const r = await fetch('https://worldtimeapi.org/api/timezone/America/Caracas', { cache: 'no-store' });
+        const antes = Date.now();
+        const r = await fetch('https://timeapi.io/api/time/current/zone?timeZone=America/Caracas', { cache: 'no-store' });
         const j = await r.json();
         const des = Date.now();
+        if (j && !isNaN(Number(j.year)) && !isNaN(Number(j.hour))) {
+          const gmtOff = Number(j.gmtOffset);
+          const offsetSeg = (!isNaN(gmtOff) && gmtOff !== 0) ? gmtOff : -14400;
+          const localMs = Date.UTC(Number(j.year), Number(j.month) - 1, Number(j.day), Number(j.hour), Number(j.minute), Number(j.seconds) || 0) - offsetSeg * 1000;
+          if (guardarRelojInternet(localMs, antes, des)) return true;
+        }
+      } catch(e) {}
+      // 2) time.akamai.com: época UTC pura (texto plano, CORS OK, sin cuotas)
+      try {
+        const antes2 = Date.now();
+        const r2 = await fetch('https://time.akamai.com/', { cache: 'no-store' });
+        const t = await r2.text();
+        const des2 = Date.now();
+        const sec = Number(String(t).trim());
+        if (!isNaN(sec) && sec > 0) {
+          if (guardarRelojInternet(sec * 1000, antes2, des2)) return true;
+        }
+      } catch(e2) {}
+      // 3) worldtimeapi.org: último recurso (inestable / CORS bloqueado en algunas redes)
+      try {
+        const antes3 = Date.now();
+        const r3 = await fetch('https://worldtimeapi.org/api/timezone/America/Caracas', { cache: 'no-store' });
+        const j3 = await r3.json();
+        const des3 = Date.now();
         let servidorMs = NaN;
-        if (j && j.utc_datetime) {
-          const iso = String(j.utc_datetime);
+        if (j3 && j3.utc_datetime) {
+          const iso = String(j3.utc_datetime);
           if (iso.length >= 19) servidorMs = Date.parse(iso.substring(0, 19) + 'Z');
         }
-        if (isNaN(servidorMs) && j && j.datetime) {
-          const iso2 = String(j.datetime);
+        if (isNaN(servidorMs) && j3 && j3.datetime) {
+          const iso2 = String(j3.datetime);
           if (iso2.length >= 19) servidorMs = Date.parse(iso2.substring(0, 19) + iso2.slice(19));
         }
         if (!isNaN(servidorMs)) {
-          internetClock = { offsetMs: servidorMs + ((des - antes) / 2) - Date.now(), updatedAt: Date.now() };
-          return true;
+          if (guardarRelojInternet(servidorMs, antes3, des3)) return true;
         }
-      } catch(e) {}
-      try {
-        const antes2 = Date.now();
-        const r2 = await fetch('https://timeapi.io/api/time/current/zone?timeZone=America/Caracas', { cache: 'no-store' });
-        const j2 = await r2.json();
-        const des2 = Date.now();
-        if (j2 && !isNaN(Number(j2.year)) && !isNaN(Number(j2.hour))) {
-          const gmtOff = Number(j2.gmtOffset);
-          const offsetSeg = (!isNaN(gmtOff) && gmtOff !== 0) ? gmtOff : -14400;
-          const localMs = Date.UTC(Number(j2.year), Number(j2.month) - 1, Number(j2.day), Number(j2.hour), Number(j2.minute), Number(j2.seconds) || 0) - offsetSeg * 1000;
-          internetClock = { offsetMs: localMs + ((des2 - antes2) / 2) - Date.now(), updatedAt: Date.now() };
-          return true;
-        }
-      } catch(e2) {}
+      } catch(e3) {}
       return false;
+    }
+
+    function guardarRelojInternet(servidorMs, antes, des) {
+      if (isNaN(servidorMs)) return false;
+      if (Math.abs(servidorMs - Date.now()) > 48 * 60 * 60 * 1000) return false;
+      internetClock = { offsetMs: servidorMs + ((des - antes) / 2) - Date.now(), updatedAt: Date.now() };
+      return true;
     }
 
     function aplicarFechaHora(d) {
       let fecha = null, hora = null;
-      if (d && !isNaN(d.getTime())) {
-        try {
-          const parts = new Intl.DateTimeFormat('es-VE', {
-            timeZone: 'America/Caracas',
-            year: 'numeric', month: '2-digit', day: '2-digit',
-            hour: '2-digit', minute: '2-digit', hour12: false, hourCycle: 'h23'
-          }).formatToParts(d);
-          const g = t => { const p = parts.find(x => x.type === t); return p ? p.value : ''; };
-          fecha = g('year') + '-' + g('month') + '-' + g('day');
-          hora = g('hour') + ':' + g('minute');
-        } catch(e) { fecha = null; }
+      const t = (d && !isNaN(d.getTime())) ? d.getTime() : null;
+      if (t !== null) {
+        // Caracas es UTC-4 sin horario de verano: hora local = UTC - 4h
+        const c = new Date(t - 4 * 3600 * 1000);
+        const p = n => String(n).padStart(2, '0');
+        fecha = c.getUTCFullYear() + '-' + p(c.getUTCMonth() + 1) + '-' + p(c.getUTCDate());
+        hora = p(c.getUTCHours()) + ':' + p(c.getUTCMinutes());
       }
       if (!fecha) {
         const now = new Date();
@@ -2927,9 +2965,63 @@ function guardarDatosEnCache() {
       }
       const lc = document.getElementById("label-comision");
       const lt = document.getElementById("label-total-usd");
-      if (lc) lc.innerHTML = `+$0.00 <span class="text-xs text-slate-400 dark:text-slate-500 font-normal">(Fijo)</span>`;
+      if (lc) lc.innerHTML = `+$0.00 <span class="text-xs text-slate-400 dark:text-slate-500 font-normal">${comisionVentaActiva ? "(Fijo)" : "(Sin comisión)"}</span>`;
       if (lt) lt.textContent = `$0.00`;
       renderResumenVenta(0, 0);
+    }
+
+    let comisionVentaActiva = true;
+
+    function actualizarBtnComision() {
+      const btn = document.getElementById('btn-toggle-comision');
+      const dot = document.getElementById('btn-toggle-comision-dot');
+      const txt = document.getElementById('btn-toggle-comision-txt');
+      if (!btn) return;
+      if (comisionVentaActiva) {
+        btn.className = 'flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all select-none border bg-amber-500 text-slate-900 border-amber-500 hover:bg-amber-400';
+        if (dot) dot.className = 'w-2 h-2 rounded-full bg-slate-900';
+        if (txt) txt.textContent = 'Comisión ON';
+      } else {
+        btn.className = 'flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all select-none border bg-slate-200 text-slate-500 border-slate-300 hover:bg-slate-300 dark:bg-slate-700 dark:text-slate-300 dark:border-slate-600 dark:hover:bg-slate-600';
+        if (dot) dot.className = 'w-2 h-2 rounded-full bg-slate-400 dark:bg-slate-500';
+        if (txt) txt.textContent = 'Comisión OFF';
+      }
+    }
+
+    function alternarComisionVenta() {
+      comisionVentaActiva = !comisionVentaActiva;
+      actualizarBtnComision();
+      const elTotal = document.getElementById("input-ves-total");
+      const netUsd = parseFloat(document.getElementById("input-usd-neto")?.value);
+      if (comisionVentaActiva) {
+        if (!isNaN(netUsd) && netUsd > 0) {
+          calcularDesdeNetUsd(netUsd);
+        } else {
+          const lc = document.getElementById("label-comision");
+          const lt = document.getElementById("label-total-usd");
+          if (lc) lc.innerHTML = `+$0.00 <span class="text-xs text-slate-400 dark:text-slate-500 font-normal">(Fijo)</span>`;
+          if (lt) lt.textContent = `$0.00`;
+          renderResumenVenta(0, 0);
+        }
+      } else {
+        const lc = document.getElementById("label-comision");
+        if (lc) lc.innerHTML = `+$0.00 <span class="text-xs text-slate-400 dark:text-slate-500 font-normal">(Sin comisión)</span>`;
+        const totalInput = parseFloat(elTotal?.value);
+        if (!isNaN(totalInput) && totalInput > 0) {
+          const esUsd = metodoVentaEsUSD();
+          const totalUsd = esUsd ? totalInput : totalInput / state.exchangeRate;
+          const totalVes = esUsd ? totalInput * state.exchangeRate : totalInput;
+          const lt = document.getElementById("label-total-usd");
+          if (lt) lt.textContent = `$${totalUsd.toFixed(2)}`;
+          renderResumenVenta(totalUsd, totalVes);
+        } else if (!isNaN(netUsd) && netUsd > 0) {
+          calcularDesdeNetUsd(netUsd);
+        } else {
+          const lt = document.getElementById("label-total-usd");
+          if (lt) lt.textContent = `$0.00`;
+          renderResumenVenta(0, 0);
+        }
+      }
     }
 
     function calcularDesdeNetUsd(netUsd) {
@@ -2937,14 +3029,18 @@ function guardarDatosEnCache() {
       let comision = 0;
       let detalleTipo = "(Fijo)";
 
-      if (rango) {
-        if (rango.type === 'fixed') {
-          comision = rango.value;
-          detalleTipo = "(Fijo)";
-        } else {
-          comision = netUsd * (rango.value / 100);
-          detalleTipo = `(${rango.value}%)`;
+      if (comisionVentaActiva) {
+        if (rango) {
+          if (rango.type === 'fixed') {
+            comision = rango.value;
+            detalleTipo = "(Fijo)";
+          } else {
+            comision = netUsd * (rango.value / 100);
+            detalleTipo = `(${rango.value}%)`;
+          }
         }
+      } else {
+        detalleTipo = "(Sin comisión)";
       }
 
       const totalUsd = netUsd + comision;
@@ -3110,11 +3206,22 @@ function guardarDatosEnCache() {
 
         const rango = buscarRangoPorNet(netUsd);
         let comision = 0;
-        if (rango) {
+        if (comisionVentaActiva && rango) {
           comision = rango.type === 'fixed' ? rango.value : netUsd * (rango.value / 100);
         }
-        const totalUsd = netUsd + comision;
-        const totalVes = esVes ? totalVesInput : totalUsd * state.exchangeRate;
+        let totalUsd, totalVes;
+        if (comisionVentaActiva) {
+          totalUsd = netUsd + comision;
+          totalVes = esVes ? totalVesInput : totalUsd * state.exchangeRate;
+        } else {
+          if (esVes) {
+            totalVes = totalVesInput;
+            totalUsd = totalVes / state.exchangeRate;
+          } else {
+            totalUsd = totalVesInput;
+            totalVes = totalUsd * state.exchangeRate;
+          }
+        }
 
         const movements = [];
         movements.push({ platform: plataformaOrigenId, delta: -netUsd, currency: 'USD' });
@@ -3468,15 +3575,11 @@ function guardarDatosEnCache() {
 
     function fechaHoyLocal() {
       if (internetClock) {
-        try {
-          const d = new Date(Date.now() + internetClock.offsetMs);
-          const parts = new Intl.DateTimeFormat('en-CA', {
-            timeZone: 'America/Caracas', year: 'numeric', month: '2-digit', day: '2-digit'
-          }).formatToParts(d);
-          const g = t => { const p = parts.find(x => x.type === t); return p ? p.value : ''; };
-          const f = g('year') + '-' + g('month') + '-' + g('day');
-          if (/^\d{4}-\d{2}-\d{2}$/.test(f)) return f;
-        } catch(e) {}
+        const t = Date.now() + internetClock.offsetMs;
+        const c = new Date(t - 4 * 3600 * 1000);
+        const p = n => String(n).padStart(2, '0');
+        const f = c.getUTCFullYear() + '-' + p(c.getUTCMonth() + 1) + '-' + p(c.getUTCDate());
+        if (/^\d{4}-\d{2}-\d{2}$/.test(f)) return f;
       }
       const d = new Date();
       return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
