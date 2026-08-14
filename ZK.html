@@ -2805,49 +2805,38 @@ function guardarDatosEnCache() {
     let internetClock = null;
 
     async function sincronizarHoraInternet() {
-      // 1) timeapi.io: hora local de Caracas (JSON, CORS OK, estable)
+      // 1) time.akamai.com: época UTC pura (texto plano, CORS OK, sin cuotas, confiable)
       try {
         const antes = Date.now();
-        const r = await fetch('https://timeapi.io/api/time/current/zone?timeZone=America/Caracas', { cache: 'no-store' });
-        const j = await r.json();
+        const r = await fetch('https://time.akamai.com/', { cache: 'no-store' });
+        const t = await r.text();
         const des = Date.now();
-        if (j && !isNaN(Number(j.year)) && !isNaN(Number(j.hour))) {
-          const gmtOff = Number(j.gmtOffset);
-          const offsetSeg = (!isNaN(gmtOff) && gmtOff !== 0) ? gmtOff : -14400;
-          const localMs = Date.UTC(Number(j.year), Number(j.month) - 1, Number(j.day), Number(j.hour), Number(j.minute), Number(j.seconds) || 0) - offsetSeg * 1000;
-          if (guardarRelojInternet(localMs, antes, des)) return true;
-        }
-      } catch(e) {}
-      // 2) time.akamai.com: época UTC pura (texto plano, CORS OK, sin cuotas)
-      try {
-        const antes2 = Date.now();
-        const r2 = await fetch('https://time.akamai.com/', { cache: 'no-store' });
-        const t = await r2.text();
-        const des2 = Date.now();
         const sec = Number(String(t).trim());
         if (!isNaN(sec) && sec > 0) {
-          if (guardarRelojInternet(sec * 1000, antes2, des2)) return true;
+          if (guardarRelojInternet(sec * 1000, antes, des)) return true;
         }
-      } catch(e2) {}
-      // 3) worldtimeapi.org: último recurso (inestable / CORS bloqueado en algunas redes)
+      } catch(e) {}
+      // 2) worldtimeapi.org: UTC explícito (a veces CORS bloqueado / caído)
       try {
-        const antes3 = Date.now();
-        const r3 = await fetch('https://worldtimeapi.org/api/timezone/America/Caracas', { cache: 'no-store' });
-        const j3 = await r3.json();
-        const des3 = Date.now();
+        const antes2 = Date.now();
+        const r2 = await fetch('https://worldtimeapi.org/api/timezone/America/Caracas', { cache: 'no-store' });
+        const j2 = await r2.json();
+        const des2 = Date.now();
         let servidorMs = NaN;
-        if (j3 && j3.utc_datetime) {
-          const iso = String(j3.utc_datetime);
+        if (j2 && j2.utc_datetime) {
+          const iso = String(j2.utc_datetime);
           if (iso.length >= 19) servidorMs = Date.parse(iso.substring(0, 19) + 'Z');
         }
-        if (isNaN(servidorMs) && j3 && j3.datetime) {
-          const iso2 = String(j3.datetime);
+        if (isNaN(servidorMs) && j2 && j2.datetime) {
+          const iso2 = String(j2.datetime);
           if (iso2.length >= 19) servidorMs = Date.parse(iso2.substring(0, 19) + iso2.slice(19));
         }
         if (!isNaN(servidorMs)) {
-          if (guardarRelojInternet(servidorMs, antes3, des3)) return true;
+          if (guardarRelojInternet(servidorMs, antes2, des2)) return true;
         }
-      } catch(e3) {}
+      } catch(e2) {}
+      // timeapi.io se retiró: devuelve la hora de Caracas con el offset viejo (UTC-4:30)
+      // quedando ~30 min atrasado, por lo que no es fiable para esta zona.
       return false;
     }
 
