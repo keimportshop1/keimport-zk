@@ -661,6 +661,29 @@
                       </div>
                     </div>
                   </div>
+                  <div class="mt-4 bg-slate-50 dark:bg-slate-900 rounded-2xl p-4 border border-slate-100 dark:border-amber-500/20 flex flex-col md:flex-row md:items-center gap-4">
+                    <div class="flex items-center space-x-3 flex-1 min-w-0">
+                      <div class="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center shrink-0">
+                        <i class="fa-solid fa-arrows-up-down text-emerald-600 dark:text-emerald-400"></i>
+                      </div>
+                      <div class="flex-1 min-w-0">
+                        <p class="text-2xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Recargo por Dólar (Bs)</p>
+                        <p class="text-sm font-bold text-slate-700 dark:text-slate-200 truncate">Tasa efectiva: <span id="label-tasa-efectiva" class="text-emerald-600 dark:text-emerald-400">880.00</span> Bs/$ · <span id="label-recargo-ganancia" class="text-amber-600 dark:text-amber-400">Ganancia: —</span></p>
+                      </div>
+                    </div>
+                    <div class="flex items-center space-x-3">
+                      <div class="relative">
+                        <input type="number" id="input-recargo-bs" placeholder="0" step="any" disabled title="Puedes poner un valor negativo para descontar"
+                          class="w-28 pl-3 pr-8 py-2 rounded-xl border border-slate-200 dark:border-amber-500/25 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/15 text-sm font-bold text-slate-800 dark:text-slate-100 bg-white dark:bg-slate-800 disabled:opacity-50">
+                        <span class="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400 dark:text-slate-500">Bs</span>
+                      </div>
+                      <button id="btn-toggle-recargo" type="button" onclick="alternarRecargoVenta()" title="Activar o desactivar el recargo por dólar (acepta negativos)"
+                        class="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all select-none border bg-slate-200 text-slate-500 border-slate-300 hover:bg-slate-300 dark:bg-slate-700 dark:text-slate-300 dark:border-slate-600 dark:hover:bg-slate-600">
+                        <span id="btn-toggle-recargo-dot" class="w-2 h-2 rounded-full bg-slate-400 dark:bg-slate-500"></span>
+                        <span id="btn-toggle-recargo-txt">Recargo OFF</span>
+                      </button>
+                    </div>
+                  </div>
                   <div class="mt-8 bg-slate-50 dark:bg-slate-900 rounded-2xl p-5 border border-slate-100 dark:border-amber-500/20 flex flex-col md:flex-row md:items-center justify-between gap-4">
                     <div class="flex items-center space-x-3">
                       <div class="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center shrink-0">
@@ -950,7 +973,7 @@
               </div>
             </div>
 
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
               <div class="bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-amber-500/20 shadow-premium p-6">
                 <span class="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Caja Total ($)</span>
                 <p id="kpi-caja-usd" class="text-3xl font-black text-slate-900 dark:text-white tracking-tight mt-4">$0.00</p>
@@ -962,6 +985,10 @@
               <div class="bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-amber-500/20 shadow-premium p-6">
                 <span class="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Utilidad Neta Ganada ($)</span>
                 <p id="kpi-utilidad" class="text-3xl font-black text-amber-600 dark:text-amber-400 tracking-tight mt-4">$0.00</p>
+              </div>
+              <div class="bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-amber-500/20 shadow-premium p-6">
+                <span class="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Ganancia Neta (Bs.)</span>
+                <p id="kpi-spread-bs" class="text-3xl font-black text-emerald-600 dark:text-emerald-400 tracking-tight mt-4">0.00 Bs</p>
               </div>
             </div>
 
@@ -2783,13 +2810,40 @@ function guardarDatosEnCache() {
             calcularDesdeTotalVes(totalVes);
           } else {
             const esUsd = metodoVentaEsUSD();
-            const totalUsd = esUsd ? totalVes : totalVes / state.exchangeRate;
-            const totalVesFinal = esUsd ? totalVes * state.exchangeRate : totalVes;
+            const totalUsd = esUsd ? totalVes : totalVes / tasaEfectivaVenta();
+            const totalVesFinal = esUsd ? totalVes * tasaEfectivaVenta() : totalVes;
             const lc = document.getElementById("label-comision");
             const lt = document.getElementById("label-total-usd");
             if (lc) lc.innerHTML = `+$0.00 <span class="text-xs text-slate-400 dark:text-slate-500 font-normal">(Sin comisión)</span>`;
             if (lt) lt.textContent = `$${totalUsd.toFixed(2)}`;
             renderResumenVenta(totalUsd, totalVesFinal);
+            actualizarLabelRecargo(totalUsd);
+          }
+        });
+      }
+
+      const inputRecargo = document.getElementById("input-recargo-bs");
+      if (inputRecargo) {
+        inputRecargo.addEventListener("input", () => {
+          if (tasaEfectivaVenta() <= 0) {
+            showToast("La tasa efectiva no puede ser 0 o negativa.", "warning");
+            actualizarLabelRecargo(0);
+            return;
+          }
+          const netUsd = parseFloat(document.getElementById("input-usd-neto")?.value);
+          const totalInput = parseFloat(document.getElementById("input-ves-total")?.value);
+          if (!isNaN(netUsd) && netUsd > 0) {
+            calcularDesdeNetUsd(netUsd);
+          } else if (!isNaN(totalInput) && totalInput > 0) {
+            const esUsd = metodoVentaEsUSD();
+            const totalUsd = esUsd ? totalInput : totalInput / tasaEfectivaVenta();
+            const totalVes = esUsd ? totalInput * tasaEfectivaVenta() : totalInput;
+            const lt = document.getElementById("label-total-usd");
+            if (lt) lt.textContent = `$${totalUsd.toFixed(2)}`;
+            renderResumenVenta(totalUsd, totalVes);
+            actualizarLabelRecargo(totalUsd);
+          } else {
+            actualizarLabelRecargo(0);
           }
         });
       }
@@ -2800,6 +2854,7 @@ function guardarDatosEnCache() {
       if (tasaCompraInput) tasaCompraInput.value = state.exchangeRate;
       const tasaCompraFloat = document.getElementById("tasa-compra-flotante");
       if (tasaCompraFloat) tasaCompraFloat.textContent = `${state.exchangeRate.toFixed(2)} Bs/$`;
+      actualizarLabelRecargo(0);
     }
 
     let internetClock = null;
@@ -2998,11 +3053,12 @@ function guardarDatosEnCache() {
         const totalInput = parseFloat(elTotal?.value);
         if (!isNaN(totalInput) && totalInput > 0) {
           const esUsd = metodoVentaEsUSD();
-          const totalUsd = esUsd ? totalInput : totalInput / state.exchangeRate;
-          const totalVes = esUsd ? totalInput * state.exchangeRate : totalInput;
+          const totalUsd = esUsd ? totalInput : totalInput / tasaEfectivaVenta();
+          const totalVes = esUsd ? totalInput * tasaEfectivaVenta() : totalInput;
           const lt = document.getElementById("label-total-usd");
           if (lt) lt.textContent = `$${totalUsd.toFixed(2)}`;
           renderResumenVenta(totalUsd, totalVes);
+          actualizarLabelRecargo(totalUsd);
         } else if (!isNaN(netUsd) && netUsd > 0) {
           calcularDesdeNetUsd(netUsd);
         } else {
@@ -3010,6 +3066,81 @@ function guardarDatosEnCache() {
           if (lt) lt.textContent = `$0.00`;
           renderResumenVenta(0, 0);
         }
+      }
+    }
+
+    let recargoVentaActivo = false;
+
+    function recargoBsValor() {
+      const el = document.getElementById('input-recargo-bs');
+      if (!recargoVentaActivo) return 0;
+      const v = parseFloat(el?.value);
+      return (!isNaN(v) && v !== 0) ? v : 0;
+    }
+
+    function tasaEfectivaVenta() {
+      return state.exchangeRate + recargoBsValor();
+    }
+
+    function actualizarUIRecargo() {
+      const btn = document.getElementById('btn-toggle-recargo');
+      const dot = document.getElementById('btn-toggle-recargo-dot');
+      const txt = document.getElementById('btn-toggle-recargo-txt');
+      const input = document.getElementById('input-recargo-bs');
+      if (btn) {
+        if (recargoVentaActivo) {
+          btn.className = 'flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all select-none border bg-emerald-500 text-slate-900 border-emerald-500 hover:bg-emerald-400';
+          if (dot) dot.className = 'w-2 h-2 rounded-full bg-slate-900';
+          if (txt) txt.textContent = 'Recargo ON';
+        } else {
+          btn.className = 'flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all select-none border bg-slate-200 text-slate-500 border-slate-300 hover:bg-slate-300 dark:bg-slate-700 dark:text-slate-300 dark:border-slate-600 dark:hover:bg-slate-600';
+          if (dot) dot.className = 'w-2 h-2 rounded-full bg-slate-400 dark:bg-slate-500';
+          if (txt) txt.textContent = 'Recargo OFF';
+        }
+      }
+      if (input) input.disabled = !recargoVentaActivo;
+    }
+
+    function actualizarLabelRecargo(totalUsd) {
+      const le = document.getElementById('label-tasa-efectiva');
+      const lg = document.getElementById('label-recargo-ganancia');
+      const rec = recargoBsValor();
+      if (le) {
+        const base = state.exchangeRate;
+        const ef = base + rec;
+        le.textContent = ef.toFixed(2) + (rec !== 0 ? ` (= ${base.toFixed(0)} ${rec > 0 ? '+' : '−'} ${Math.abs(rec).toFixed(0)})` : '');
+      }
+      if (lg) {
+        const gan = (totalUsd || 0) * rec;
+        if (rec > 0) lg.textContent = `Ganancia: +Bs ${gan.toFixed(2)}`;
+        else if (rec < 0) lg.textContent = `Descuento: −Bs ${Math.abs(gan).toFixed(2)}`;
+        else lg.textContent = 'Ganancia: —';
+      }
+    }
+
+    function alternarRecargoVenta() {
+      recargoVentaActivo = !recargoVentaActivo;
+      actualizarUIRecargo();
+      if (tasaEfectivaVenta() <= 0) {
+        showToast("La tasa efectiva no puede ser 0 o negativa.", "warning");
+        actualizarLabelRecargo(0);
+        return;
+      }
+      const elTotal = document.getElementById("input-ves-total");
+      const netUsd = parseFloat(document.getElementById("input-usd-neto")?.value);
+      const totalInput = parseFloat(elTotal?.value);
+      if (!isNaN(netUsd) && netUsd > 0) {
+        calcularDesdeNetUsd(netUsd);
+      } else if (!isNaN(totalInput) && totalInput > 0) {
+        const esUsd = metodoVentaEsUSD();
+        const totalUsd = esUsd ? totalInput : totalInput / tasaEfectivaVenta();
+        const totalVes = esUsd ? totalInput * tasaEfectivaVenta() : totalInput;
+        const lt = document.getElementById("label-total-usd");
+        if (lt) lt.textContent = `$${totalUsd.toFixed(2)}`;
+        renderResumenVenta(totalUsd, totalVes);
+        actualizarLabelRecargo(totalUsd);
+      } else {
+        actualizarLabelRecargo(0);
       }
     }
 
@@ -3033,18 +3164,19 @@ function guardarDatosEnCache() {
       }
 
       const totalUsd = netUsd + comision;
-      const totalVes = totalUsd * state.exchangeRate;
+      const totalVes = totalUsd * tasaEfectivaVenta();
       const esUsd = metodoVentaEsUSD();
 
       document.getElementById("input-ves-total").value = (esUsd ? totalUsd : totalVes).toFixed(2);
       document.getElementById("label-comision").innerHTML = `+$${comision.toFixed(2)} <span class="text-xs text-slate-400 dark:text-slate-500 font-normal">${detalleTipo}</span>`;
       document.getElementById("label-total-usd").textContent = `$${totalUsd.toFixed(2)}`;
       renderResumenVenta(totalUsd, totalVes);
+      actualizarLabelRecargo(totalUsd);
     }
 
     function calcularDesdeTotalVes(totalVes) {
       const esUsd = metodoVentaEsUSD();
-      const totalUsd = esUsd ? totalVes : totalVes / state.exchangeRate;
+      const totalUsd = esUsd ? totalVes : totalVes / tasaEfectivaVenta();
       let netUsd = 0;
       let comision = 0;
       let detalleTipo = "(Fijo)";
@@ -3087,7 +3219,8 @@ function guardarDatosEnCache() {
       document.getElementById("label-comision").innerHTML = `+$${comision.toFixed(2)} <span class="text-xs text-slate-400 dark:text-slate-500 font-normal">${detalleTipo}</span>`;
       document.getElementById("label-total-usd").textContent = `$${totalUsd.toFixed(2)}`;
       if (esUsd) document.getElementById("input-ves-total").value = totalUsd.toFixed(2);
-      renderResumenVenta(totalUsd, esUsd ? totalUsd * state.exchangeRate : totalVes);
+      renderResumenVenta(totalUsd, esUsd ? totalUsd * tasaEfectivaVenta() : totalVes);
+      actualizarLabelRecargo(totalUsd);
     }
 
     function buscarRangoPorNet(netUsd) {
@@ -3141,6 +3274,8 @@ function guardarDatosEnCache() {
         const netUsd = parseFloat(inputUsdNeto.value);
         if (!isNaN(netUsd) && netUsd > 0) {
           calcularDesdeNetUsd(netUsd);
+        } else {
+          actualizarLabelRecargo(0);
         }
       }
       guardarConfigEnNube();
@@ -3201,14 +3336,14 @@ function guardarDatosEnCache() {
         let totalUsd, totalVes;
         if (comisionVentaActiva) {
           totalUsd = netUsd + comision;
-          totalVes = esVes ? totalVesInput : totalUsd * state.exchangeRate;
+          totalVes = esVes ? totalVesInput : totalUsd * tasaEfectivaVenta();
         } else {
           if (esVes) {
             totalVes = totalVesInput;
-            totalUsd = totalVes / state.exchangeRate;
+            totalUsd = totalVes / tasaEfectivaVenta();
           } else {
             totalUsd = totalVesInput;
-            totalVes = totalUsd * state.exchangeRate;
+            totalVes = totalUsd * tasaEfectivaVenta();
           }
         }
 
@@ -3244,7 +3379,7 @@ function guardarDatosEnCache() {
           p_comision: comision,
           p_total_usd: totalUsd,
           p_total_ves: totalVes,
-          p_tasa: state.exchangeRate,
+          p_tasa: tasaEfectivaVenta(),
           p_metodo: metodo,
           p_plataforma: plataformaOrigenId,
           p_movimientos: movements
@@ -3723,10 +3858,14 @@ function guardarDatosEnCache() {
       const comisiones = state.sales.reduce((a, s) => a + (s.commission || 0), 0);
       const comprasHoy = state.purchases.filter(c => c.date === hoy);
       const comprasHoyUsd = comprasHoy.reduce((a, c) => a + (c.usd || 0), 0);
+      let gananciaBsPanel = 0;
+      state.sales.forEach(s => { if (esMetodoVES(s.method)) gananciaBsPanel += s.totalVes || 0; });
+      state.purchases.forEach(c => { if (!c.paymentCurrency || c.paymentCurrency === 'VES') gananciaBsPanel -= c.totalVes || 0; });
 
       const kpis = [
         { icon: 'fa-chart-line', label: 'Ventas de Hoy', valorMonto: false, subMonto: true, valor: `${ventasHoy.length} operaciones`, sub: `$${ventasHoyUsd.toLocaleString('en-US', {minimumFractionDigits: 2})} · ${ventasHoyVes.toLocaleString('es-VE', {minimumFractionDigits: 2})} Bs` },
         { icon: 'fa-coins', label: 'Comisiones Ganadas', valorMonto: true, subMonto: false, valor: `$${comisiones.toLocaleString('en-US', {minimumFractionDigits: 2})}`, sub: 'Total histórico' },
+        { icon: 'fa-scale-balanced', label: 'Ganancia Neta (Bs)', valorMonto: true, subMonto: false, valor: `${gananciaBsPanel.toLocaleString('es-VE', {minimumFractionDigits: 2})} Bs`, sub: 'Spread cambiario' },
         { icon: 'fa-basket-shopping', label: 'Compras de Hoy', valorMonto: false, subMonto: true, valor: `${comprasHoy.length} operaciones`, sub: `$${comprasHoyUsd.toLocaleString('en-US', {minimumFractionDigits: 2})} recibido` }
       ];
       kpis.forEach(k => {
@@ -4475,15 +4614,27 @@ function guardarDatosEnCache() {
     // RENDERIZADO AUDITORÍA E HISTORIAL
     // ==========================================
     function renderKPIs() {
-      let usd = 0, ves = 0, profit = 0;
+      let usd = 0, ves = 0, profit = 0, gananciaBs = 0;
       state.sales.forEach(s => {
         usd += s.totalUsd;
         ves += s.totalVes;
         profit += s.commission;
+        if (esMetodoVES(s.method)) gananciaBs += s.totalVes;
       });
+      let comprasBs = 0;
+      state.purchases.forEach(c => {
+        if (!c.paymentCurrency || c.paymentCurrency === 'VES') comprasBs += c.totalVes || 0;
+      });
+      gananciaBs -= comprasBs;
       document.getElementById('kpi-caja-usd').textContent = `$${usd.toLocaleString('en-US', {minimumFractionDigits:2})}`;
       document.getElementById('kpi-caja-ves').textContent = `${ves.toLocaleString('es-VE', {minimumFractionDigits:2})} Bs`;
       document.getElementById('kpi-utilidad').textContent = `$${profit.toLocaleString('en-US', {minimumFractionDigits:2})}`;
+      const elSpread = document.getElementById('kpi-spread-bs');
+      if (elSpread) {
+        const neg = gananciaBs < 0;
+        elSpread.textContent = (neg ? '-' : '') + Math.abs(gananciaBs).toLocaleString('es-VE', {minimumFractionDigits:2}) + ' Bs';
+        elSpread.className = 'text-3xl font-black tracking-tight mt-4 ' + (neg ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400');
+      }
     }
 
     function renderHistorial(salesToRender) {
