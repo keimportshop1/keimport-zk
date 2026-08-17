@@ -84,9 +84,11 @@ create table if not exists public.ventas (
   plataforma  text not null default '',
   vendedor    text not null default '',
   movimientos jsonb not null default '[]',
+  lotes_consumidos jsonb not null default '[]',
   creado_en   timestamptz not null default now()
 );
 create index if not exists idx_ventas_fecha on public.ventas(fecha);
+alter table public.ventas add column if not exists lotes_consumidos jsonb not null default '[]';
 
 create table if not exists public.compras (
   id         uuid primary key default gen_random_uuid(),
@@ -296,7 +298,7 @@ begin
       'netUsd', net_usd, 'commission', comision, 'totalUsd', total_usd,
       'totalVes', total_ves, 'exchangeRate', tasa_cambio,
       'method', metodo, 'platform', plataforma, 'user', vendedor,
-      'movements', movimientos, 'createdAt', creado_en)
+      'movements', movimientos, 'lotesConsumidos', lotes_consumidos, 'createdAt', creado_en)
       order by fecha desc, creado_en desc), '[]'::jsonb)
     into v_ventas from public.ventas;
   select coalesce(jsonb_agg(jsonb_build_object(
@@ -371,6 +373,9 @@ $$;
 -- En una sola transacciÃ³n: inserta la venta, actualiza saldos de
 -- plataformas con bloqueos de fila y hace upsert del cliente.
 -- ------------------------------------------------------------
+-- Se elimina la firma vieja para evitar ambigÃ¼edad de sobrecarga en PostgREST
+drop function if exists public.registrar_venta(text, text, text, text, text, text, text, text, text, text, text, numeric, numeric, numeric, numeric, numeric, text, text, jsonb);
+
 create or replace function public.registrar_venta(
   p_token text,
   p_fecha text,
@@ -390,7 +395,8 @@ create or replace function public.registrar_venta(
   p_tasa numeric,
   p_metodo text,
   p_plataforma text,
-  p_movimientos jsonb
+  p_movimientos jsonb,
+  p_forzar boolean default false
 )
 returns jsonb
 language plpgsql security definer
@@ -400,6 +406,12 @@ declare
   v_ses record;
   v_id uuid;
   v_plataformas jsonb;
+  v_inventario jsonb;
+  v_consumo jsonb := '[]';
+  v_rest numeric;
+  v_disp numeric := 0;
+  v_used numeric;
+  l record;
   m jsonb;
 begin
   select * into v_ses from public._sesion_valida(p_token);
@@ -427,16 +439,53 @@ begin
      where id = (m->>'platform')::text;
   end loop;
 
+  -- Consumo de lotes FIFO: se bloquean las compras para serializar
+  -- ventas concurrentes de mÃ¡s de un dispositivo.
+  for l in select c.id from public.compras c order by c.fecha asc, c.creado_en asc for update loop
+    null;
+  end loop;
+
+  select coalesce(sum(l.disponible), 0)::numeric into v_disp from public._calcular_lotes() l;
+
+  v_rest := coalesce(p_net_usd, 0);
+  for l in select * from public._calcular_lotes() loop
+    if v_rest <= 0 then exit; end if;
+    if l.disponible > 0 then
+      v_used := least(v_rest, l.disponible);
+      v_consumo := v_consumo || jsonb_build_object(
+        'compraId', l.compra_id::text,
+        'cantidad', v_used,
+        'tasa', l.tasa,
+        'fechaCompra', l.fecha,
+        'alerta', case when l.fecha > p_fecha then 'fecha_anterior_a_compra'::text end
+      );
+      v_rest := v_rest - v_used;
+    end if;
+  end loop;
+
+  if v_rest > 0 and not coalesce(p_forzar, false) then
+    return jsonb_build_object('ok', false, 'estado', 'sin_inventario',
+      'msg', 'Inventario insuficiente: hay ' || v_disp::text || ' $ disponibles y faltan ' || v_rest::text || ' $ para esta venta.',
+      'requerido', v_rest, 'disponible', v_disp);
+  end if;
+
+  if v_rest > 0 then
+    v_consumo := v_consumo || jsonb_build_object(
+      'compraId', null, 'cantidad', v_rest, 'tasa', 0,
+      'alerta', 'inventario_insuficiente');
+  end if;
+
   insert into public.ventas (
     fecha, hora, date_display, cliente, cedula, contacto, banco, last4, last4_alt,
     concepto, net_usd, comision, total_usd, total_ves, tasa_cambio, metodo,
-    plataforma, vendedor, movimientos
+    plataforma, vendedor, movimientos, lotes_consumidos
   ) values (
     p_fecha, coalesce(p_hora,''), coalesce(p_date_display,''), p_cliente,
     coalesce(p_cedula,''), coalesce(p_contacto,''), coalesce(p_banco,''),
     coalesce(p_last4,''), coalesce(p_last4_alt,''), coalesce(p_concepto,''),
     p_net_usd, coalesce(p_comision,0), p_total_usd, p_total_ves, coalesce(p_tasa,0),
-    coalesce(p_metodo,''), coalesce(p_plataforma,''), v_ses.username, coalesce(p_movimientos,'[]'::jsonb)
+    coalesce(p_metodo,''), coalesce(p_plataforma,''), v_ses.username,
+    coalesce(p_movimientos,'[]'::jsonb), v_consumo
   ) returning id into v_id;
 
   update public.config set last_sale_at = now(), updated_at = now() where uid = 1;
@@ -446,7 +495,13 @@ begin
       'updatedAt', updated_at)), '[]'::jsonb)
     into v_plataformas from public.plataformas;
 
-  return jsonb_build_object('ok', true, 'id', v_id::text, 'plataformas', v_plataformas);
+  select coalesce(jsonb_agg(jsonb_build_object(
+      'compraId', i.compra_id::text, 'cantidad', i.disponible,
+      'tasa', i.tasa, 'fecha', i.fecha)), '[]'::jsonb)
+    into v_inventario from public._calcular_lotes() i where i.disponible > 0;
+
+  return jsonb_build_object('ok', true, 'id', v_id::text,
+    'plataformas', v_plataformas, 'lotes', v_consumo, 'inventario', v_inventario);
 end;
 $$;
 
@@ -510,6 +565,36 @@ begin
 
   return jsonb_build_object('ok', true, 'id', v_id::text, 'plataformas', v_plataformas);
 end;
+$$;
+
+-- ------------------------------------------------------------
+-- INVENTARIO POR LOTES (FIFO)
+-- Lotes disponibles = compras - consumo ya registrado en ventas.
+-- Se ordena por fecha, creado_en: el lote más viejo se consume primero.
+-- ------------------------------------------------------------
+create or replace function public._calcular_lotes()
+returns table (
+  compra_id uuid,
+  fecha text,
+  creado_en timestamptz,
+  tasa numeric,
+  original numeric,
+  disponible numeric
+)
+language sql security definer stable
+set search_path = public
+as $$
+  with consumido as (
+    select (l->>'compraId')::uuid as cid, sum((l->>'cantidad')::numeric) as total
+    from public.ventas v, jsonb_array_elements(coalesce(v.lotes_consumidos, '[]'::jsonb)) l
+    where (l->>'compraId') is not null
+    group by (l->>'compraId')::uuid
+  )
+  select c.id, c.fecha, c.creado_en, c.tasa_cambio, c.monto_usd,
+         c.monto_usd - coalesce(k.total, 0) as disponible
+  from public.compras c
+  left join consumido k on k.cid = c.id
+  order by c.fecha asc, c.creado_en asc;
 $$;
 
 -- ------------------------------------------------------------
@@ -728,7 +813,7 @@ grant execute on function public.eliminar_usuario(text, text) to anon;
 grant execute on function public._sesion_valida(text) to anon;
 grant execute on function public.get_estado(text) to anon;
 grant execute on function public.get_resumen(text) to anon;
-grant execute on function public.registrar_venta(text, text, text, text, text, text, text, text, text, text, text, numeric, numeric, numeric, numeric, numeric, text, text, jsonb) to anon;
+grant execute on function public.registrar_venta(text, text, text, text, text, text, text, text, text, text, text, numeric, numeric, numeric, numeric, numeric, text, text, jsonb, boolean) to anon;
 grant execute on function public.registrar_compra(text, text, text, text, numeric, numeric, numeric, text, text, text, text, text, text, jsonb) to anon;
 grant execute on function public.eliminar_venta(text, text) to anon;
 grant execute on function public.eliminar_compra(text, text) to anon;
@@ -779,8 +864,63 @@ begin
            coalesce(monto_ves, 0), coalesce(metodo_pago, ''), coalesce(plataforma, ''),
            coalesce(pago_movil, ''), coalesce(titular, ''), coalesce(forma_pago, 'VES'),
            coalesce(referencia, ''), coalesce(creado_en, now())
-    from public.purchases
-    on conflict (id) do nothing;
+from public.purchases
+     on conflict (id) do nothing;
   end if;
+end
+$$;
+
+-- ------------------------------------------------------------
+-- (Opcional) BACKFILL DE LOTES CONSUMIDOS (FIFO)
+-- Rellena lotes_consumidos de las ventas histÃ³ricas (las que estÃ¡n
+-- vacÃ­as), reproduciendo el consumo en orden cronolÃ³gico contra las
+-- compras. Es idempotente: solo toca ventas sin lotes asignados.
+-- ------------------------------------------------------------
+do $$
+declare
+  v_rec record;
+  v_consumo jsonb;
+  v_rest numeric;
+  v_used numeric;
+  l record;
+begin
+  for v_rec in
+    select id, fecha, net_usd
+    from public.ventas
+    where coalesce(lotes_consumidos, '[]'::jsonb) = '[]'::jsonb
+    order by fecha asc, creado_en asc
+  loop
+    v_rest := coalesce(v_rec.net_usd, 0);
+    v_consumo := '[]';
+    for l in
+      with consumido as (
+        select (x->>'compraId')::uuid as cid, sum((x->>'cantidad')::numeric) as total
+        from public.ventas v, jsonb_array_elements(coalesce(v.lotes_consumidos, '[]'::jsonb)) x
+        where (x->>'compraId') is not null
+        group by (x->>'compraId')::uuid
+      )
+      select c.id, c.fecha, c.tasa_cambio, c.monto_usd - coalesce(k.total, 0) as disp
+      from public.compras c
+      left join consumido k on k.cid = c.id
+      order by c.fecha asc, c.creado_en asc
+    loop
+      if v_rest <= 0 then exit; end if;
+      if l.disp > 0 then
+        v_used := least(v_rest, l.disp);
+        v_consumo := v_consumo || jsonb_build_object(
+          'compraId', l.id::text, 'cantidad', v_used, 'tasa', l.tasa_cambio,
+          'fechaCompra', l.fecha,
+          'alerta', case when l.fecha > v_rec.fecha then 'fecha_anterior_a_compra'::text end
+        );
+        v_rest := v_rest - v_used;
+      end if;
+    end loop;
+    if v_rest > 0 then
+      v_consumo := v_consumo || jsonb_build_object(
+        'compraId', null, 'cantidad', v_rest, 'tasa', 0,
+        'alerta', 'inventario_insuficiente');
+    end if;
+    update public.ventas set lotes_consumidos = v_consumo where id = v_rec.id;
+  end loop;
 end
 $$;
