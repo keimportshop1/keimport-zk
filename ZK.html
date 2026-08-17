@@ -1094,6 +1094,7 @@
                 <h3 class="font-bold text-slate-900 dark:text-white flex items-center gap-2">
                   <i class="fa-solid fa-layer-group text-amber-600 dark:text-amber-400"></i> Dólares por tasa
                 </h3>
+                <button onclick="mostrarModalSaldosRestantes()" class="px-3 py-1.5 rounded-lg bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300 text-xs font-bold hover:bg-amber-100 dark:hover:bg-amber-500/25 transition-all">Ver todos los saldos</button>
               </div>
               <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Cuántos dólares te quedan de cada tasa comprada. Las tasas agotadas desaparecen.</p>
               <div id="resumen-lotes-historial" class="mt-3"></div>
@@ -3966,6 +3967,12 @@ function guardarDatosEnCache() {
         wrap.className = 'mt-2';
         cardSpread.appendChild(wrap);
         renderResumenLotes('resumen-lotes-panel', true);
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'mt-2 text-2xs font-bold text-amber-600 dark:text-amber-400 hover:underline';
+        btn.textContent = 'Ver todos los saldos →';
+        btn.onclick = mostrarModalSaldosRestantes;
+        wrap.appendChild(btn);
       }
 
       // ---- Gráficos ----
@@ -4834,6 +4841,42 @@ function guardarDatosEnCache() {
                </tbody>
              </table>
            </div>`;
+    }
+
+    function mostrarModalSaldosRestantes() {
+      const filas = resumenLotes();
+      const overlay = document.createElement('div');
+      overlay.id = 'modal-saldos-restantes';
+      overlay.className = 'fixed inset-0 z-[998] flex items-center justify-center bg-black/60 p-4';
+      const body = filas.length === 0
+        ? '<div class="text-xs text-slate-500 dark:text-slate-400 text-center py-4">No hay dólares restantes por tasa.</div>'
+        : filas.map(f => `
+            <div class="flex items-center justify-between rounded-xl bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-100 dark:border-emerald-500/20 px-3 py-2.5">
+              <div>
+                <p class="font-bold text-xs text-slate-800 dark:text-slate-100">Tasa @ ${f.tasa.toLocaleString('es-VE', {minimumFractionDigits: 2})}</p>
+                <p class="text-2xs text-slate-500 dark:text-slate-400">Comprados ${f.comprados.toLocaleString('en-US', {minimumFractionDigits: 2})} $ · Vendidos ${f.vendidos.toLocaleString('en-US', {minimumFractionDigits: 2})} $</p>
+              </div>
+              <p class="font-black text-base text-emerald-600 dark:text-emerald-400 text-right">${f.restantes.toLocaleString('en-US', {minimumFractionDigits: 2})} $</p>
+            </div>`).join('');
+      overlay.innerHTML = `
+        <div class="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-md border p-6 shadow-xl">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <i class="fa-solid fa-layer-group text-amber-600 dark:text-amber-400"></i> Dólares restantes por tasa
+            </h3>
+            <button onclick="cerrarModalSaldosRestantes()" class="p-1.5 rounded-lg text-slate-400 dark:text-slate-500 hover:text-red-600 dark:hover:text-red-400">
+              <i class="fa-solid fa-xmark text-lg"></i>
+            </button>
+          </div>
+          <div class="space-y-2 mb-4">${body}</div>
+          <button onclick="cerrarModalSaldosRestantes()" class="w-full px-4 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold text-sm">Cerrar</button>
+        </div>`;
+      document.body.appendChild(overlay);
+    }
+
+    function cerrarModalSaldosRestantes() {
+      const el = document.getElementById('modal-saldos-restantes');
+      if (el) el.remove();
     }
 
     function renderHistorial(salesToRender) {
