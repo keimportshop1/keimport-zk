@@ -445,7 +445,7 @@ begin
     null;
   end loop;
 
-  select coalesce(sum(l.disponible), 0)::numeric into v_disp from public._calcular_lotes() l;
+  select coalesce(sum(lo.disponible), 0)::numeric into v_disp from public._calcular_lotes() lo;
 
   v_rest := coalesce(p_net_usd, 0);
   for l in select * from public._calcular_lotes() loop

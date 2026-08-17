@@ -3432,7 +3432,7 @@ function guardarDatosEnCache() {
           p_plataforma: plataformaOrigenId,
           p_movimientos: movements
         };
-        if (forzar) paramsVenta.p_forzar = true;
+        paramsVenta.p_forzar = !!forzar;
         let r = await supaRpc('registrar_venta', paramsVenta);
         // Compatibilidad con servidor aún sin migración de lotes: reintenta sin p_forzar
         if (!r.ok && forzar && r.error && (r.error.indexOf('PGRST') >= 0 || r.error.indexOf('does not exist') >= 0)) {
