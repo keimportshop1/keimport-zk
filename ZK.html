@@ -732,10 +732,18 @@
                       </button>
                     </div>
                   </div>
-                  <div class="space-y-1.5">
+                  <div class="space-y-1.5 relative" id="cliente-wrap">
                     <label for="input-cliente" class="block text-xs font-semibold text-slate-600 dark:text-slate-300">Nombre y Apellido</label>
-                    <input type="text" id="input-cliente" required placeholder="Ej: Juan Pérez"
-                      class="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-amber-500/25 focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/15 text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white">
+                    <div class="relative">
+                      <input type="text" id="input-cliente" required placeholder="Ej: Juan Pérez"
+                        class="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-amber-500/25 focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/15 text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white pr-11"
+                        oninput="buscarClientePorNombreVenta()" autocomplete="off">
+                      <button type="button" onclick="buscarClientePorNombreVenta()"
+                        class="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 flex items-center justify-center rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 transition-all">
+                        <i class="fa-solid fa-magnifying-glass text-sm"></i>
+                      </button>
+                    </div>
+                    <div id="dropdown-clientes-venta" class="hidden absolute left-0 right-0 top-full mt-1 bg-white dark:bg-slate-800 border border-amber-500/25 rounded-xl shadow-xl max-h-60 overflow-y-auto z-30"></div>
                   </div>
                   <div class="space-y-1.5">
                     <label for="input-contacto-zinli" class="block text-xs font-semibold text-slate-600 dark:text-slate-300">Correo / Teléfono registrado en Zinli</label>
@@ -889,10 +897,18 @@
                   <i class="fa-solid fa-basket-shopping text-amber-600 dark:text-amber-400"></i> Detalles de Compra
                 </h3>
                 <form id="form-compra" class="space-y-4" onsubmit="handleGuardarCompra(event)">
-                  <div class="space-y-1.5">
+                  <div class="space-y-1.5 relative" id="vendedor-wrap">
                     <label for="input-vendedor" class="block text-xs font-semibold text-slate-600 dark:text-slate-300">Vendedor / Proveedor</label>
-                    <input type="text" id="input-vendedor" required placeholder="Ej: María López"
-                      class="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-amber-500/25 focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/15 text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white">
+                    <div class="relative">
+                      <input type="text" id="input-vendedor" required placeholder="Ej: María López"
+                        class="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-amber-500/25 focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/15 text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white pr-11"
+                        oninput="buscarClientePorNombreCompra()" autocomplete="off">
+                      <button type="button" onclick="buscarClientePorNombreCompra()"
+                        class="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 flex items-center justify-center rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 transition-all">
+                        <i class="fa-solid fa-magnifying-glass text-sm"></i>
+                      </button>
+                    </div>
+                    <div id="dropdown-clientes-compra" class="hidden absolute left-0 right-0 top-full mt-1 bg-white dark:bg-slate-800 border border-amber-500/25 rounded-xl shadow-xl max-h-60 overflow-y-auto z-30"></div>
                   </div>
                   <div class="space-y-1.5">
                     <label for="select-compra-plataforma" class="block text-xs font-semibold text-slate-600 dark:text-slate-300">¿En qué plataforma recibes?</label>
@@ -4375,6 +4391,120 @@ function guardarDatosEnCache() {
       document.getElementById("input-last4-alt").value = encontrado.last4Alt || "";
       showToast(`Cliente encontrado: ${encontrado.name}.`, "success");
     }
+
+    function buscarClientePorNombreCompra() {
+      if (window._buscarCompraBloqueado) { window._buscarCompraBloqueado = false; return; }
+      const vendedor = document.getElementById("input-vendedor").value.trim();
+      const dropdown = document.getElementById("dropdown-clientes-compra");
+      if (!vendedor || vendedor.length < 2) {
+        dropdown.classList.add("hidden");
+        return;
+      }
+      const q = vendedor.toLowerCase().trim();
+      const coincidencias = state.clients.filter(c =>
+        (c.name || "").toLowerCase().includes(q)
+      );
+      if (coincidencias.length === 0) {
+        dropdown.innerHTML = `<div class="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">No se encontraron clientes con "${esc(vendedor)}"</div>`;
+        dropdown.classList.remove("hidden");
+        return;
+      }
+      dropdown.innerHTML = "";
+      coincidencias.forEach(c => {
+        const item = document.createElement("div");
+        item.className = "px-4 py-3 hover:bg-amber-50 dark:hover:bg-amber-500/10 cursor-pointer transition-all border-b border-slate-100 dark:border-amber-500/10 last:border-0";
+        item.innerHTML = `
+          <div class="flex items-center justify-between gap-3">
+            <div class="min-w-0">
+              <p class="text-sm font-bold text-slate-900 dark:text-white truncate">${esc(c.name)}</p>
+              <p class="text-xs text-slate-500 dark:text-slate-400 truncate">${esc(c.cedula)}${c.contact ? " · " + esc(c.contact) : ""}</p>
+            </div>
+            <i class="fa-solid fa-user-check text-amber-500 text-sm shrink-0"></i>
+          </div>
+        `;
+        item.addEventListener("click", () => seleccionarClienteCompra(c));
+        dropdown.appendChild(item);
+      });
+      dropdown.classList.remove("hidden");
+    }
+
+    function seleccionarClienteCompra(cliente) {
+      document.getElementById("input-vendedor").value = cliente.name || "";
+      document.getElementById("input-compra-titular").value = cliente.name || "";
+      if (cliente.contact) {
+        document.getElementById("input-compra-pagomovil").value = cliente.contact;
+      }
+      const dropdown = document.getElementById("dropdown-clientes-compra");
+      dropdown.classList.add("hidden");
+      showToast(`Cliente seleccionado: ${cliente.name}.`, "success");
+      window._buscarCompraBloqueado = true;
+    }
+
+    function buscarClientePorNombreVenta() {
+      if (window._buscarVentaBloqueado) { window._buscarVentaBloqueado = false; return; }
+      const cliente = document.getElementById("input-cliente").value.trim();
+      const dropdown = document.getElementById("dropdown-clientes-venta");
+      if (!cliente || cliente.length < 2) {
+        dropdown.classList.add("hidden");
+        return;
+      }
+      const q = cliente.toLowerCase().trim();
+      const coincidencias = state.clients.filter(c =>
+        (c.name || "").toLowerCase().includes(q)
+      );
+      if (coincidencias.length === 0) {
+        dropdown.innerHTML = `<div class="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">No se encontraron clientes con "${esc(cliente)}"</div>`;
+        dropdown.classList.remove("hidden");
+        return;
+      }
+      dropdown.innerHTML = "";
+      coincidencias.forEach(c => {
+        const item = document.createElement("div");
+        item.className = "px-4 py-3 hover:bg-amber-50 dark:hover:bg-amber-500/10 cursor-pointer transition-all border-b border-slate-100 dark:border-amber-500/10 last:border-0";
+        item.innerHTML = `
+          <div class="flex items-center justify-between gap-3">
+            <div class="min-w-0">
+              <p class="text-sm font-bold text-slate-900 dark:text-white truncate">${esc(c.name)}</p>
+              <p class="text-xs text-slate-500 dark:text-slate-400 truncate">${esc(c.cedula)}${c.contact ? " · " + esc(c.contact) : ""}</p>
+            </div>
+            <i class="fa-solid fa-user-check text-amber-500 text-sm shrink-0"></i>
+          </div>
+        `;
+        item.addEventListener("click", () => seleccionarClienteVenta(c));
+        dropdown.appendChild(item);
+      });
+      dropdown.classList.remove("hidden");
+    }
+
+    function seleccionarClienteVenta(cliente) {
+      document.getElementById("input-cliente").value = cliente.name || "";
+      document.getElementById("input-cedula").value = cliente.cedula || "";
+      document.getElementById("input-contacto-zinli").value = cliente.contact || "";
+      if (cliente.bank && BANCO_PLATAFORMA_OPTIONS.includes(cliente.bank)) {
+        document.getElementById("select-banco-origen").value = cliente.bank;
+      }
+      document.getElementById("input-last4").value = cliente.last4 || "";
+      document.getElementById("input-last4-alt").value = cliente.last4Alt || "";
+      const dropdown = document.getElementById("dropdown-clientes-venta");
+      dropdown.classList.add("hidden");
+      showToast(`Cliente seleccionado: ${cliente.name}.`, "success");
+      window._buscarVentaBloqueado = true;
+    }
+
+    function cerrarDropdownCliente(e) {
+      const wrapCompra = document.getElementById("vendedor-wrap");
+      const wrapVenta = document.getElementById("cliente-wrap");
+      const inCompra = wrapCompra && wrapCompra.contains(e.target);
+      const inVenta = wrapVenta && wrapVenta.contains(e.target);
+      if (!inCompra && !inVenta) {
+        const d1 = document.getElementById("dropdown-clientes-compra");
+        const d2 = document.getElementById("dropdown-clientes-venta");
+        if (d1) d1.classList.add("hidden");
+        if (d2) d2.classList.add("hidden");
+      }
+    }
+
+    document.addEventListener("click", cerrarDropdownCliente);
 
     function upsertCliente(datos) {
       const cedNorm = normalizarCedula(datos.cedula);
